@@ -10,3 +10,9 @@ font = "sans serif"
 
 [server]
 headless = true
+
+[client]
+# Show full error tracebacks in the browser rather than redacting them.
+# Useful for diagnosing deployment-only issues. Turn off for any production
+# app handling user data; safe here because nothing is user-specific.
+showErrorDetails = "full"
