@@ -1,0 +1,5 @@
+metric,n_all,r_all,n_no2020,r_no2020
+legacy gap_score (headline),150,-0.063,120,-0.005
+offense-only composite,150,-0.089,120,-0.086
+defense-only composite,150,-0.047,120,-0.012
+combined offense+defense composite,150,-0.086,120,-0.054

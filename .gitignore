@@ -1,0 +1,35 @@
+# Secrets — never commit these
+.env
+OpenAIKey.txt
+.streamlit/secrets.toml
+
+# Python noise
+__pycache__/
+*.pyc
+*.pyo
+.ipynb_checkpoints/
+*.egg-info/
+
+# Local logs and ad-hoc runtime files
+logs/
+*.log
+
+# Pybaseball local cache
+.pybaseball_cache/
+pybaseball_cache/
+
+# OneDrive / OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+~$*
+
+# Streamlit / Plotly artifacts that get regenerated
+**/.streamlit/runtime/
+**/__pycache__/
+
+# NOTE: data/ is intentionally NOT ignored. The CSVs (batting, pitching,
+# contracts, OAA, sprint speed, catcher_defense, archetypes) and the ChromaDB
+# vectorstore are required by the app at runtime on Streamlit Cloud. Total size
+# under 25 MB. If size becomes a concern, switch to rebuilding-on-startup via
+# the pipelines.

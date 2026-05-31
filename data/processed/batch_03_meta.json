@@ -1,0 +1,10 @@
+{
+  "batch_id": "batch_6a19c86732dc819095f667ad72eb8541",
+  "input_file_id": "file-RHmFkKmKuYHE5Z44iZ8rKR",
+  "endpoint": "/v1/chat/completions",
+  "submitted_at": 1780074599,
+  "year": 2024,
+  "prior_year": 2023,
+  "n_requests": 2541,
+  "status_at_submit": "validating"
+}
