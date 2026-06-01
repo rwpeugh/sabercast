@@ -1,1 +1,1 @@
-year=2023  batting=cached  pitching=cached  bat_rows=660  pit_rows=863
+year=2025  batting=bref  pitching=bref  bat_rows=675  pit_rows=873

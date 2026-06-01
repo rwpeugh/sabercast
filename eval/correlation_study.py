@@ -1,6 +1,6 @@
-"""eval/correlation_study.py — 5-year correlation between gap score and next-year wins.
+"""eval/correlation_study.py — 6-year correlation between gap score and next-year wins.
 
-For each (evaluation_year, team) in 2019–2023 × 30 MLB teams:
+For each (evaluation_year, team) in 2019–2024 × 30 MLB teams (180 rows):
   1. Aggregate the team's offensive + pitching stats from the year-specific CSV
   2. Compute deltas vs league per-team averages
   3. Call ``diagnose_gaps_llm`` to get top 3 gaps with scores
@@ -19,11 +19,12 @@ Outputs:
   eval/results/correlation_by_year.png
 
 Caching: diagnose_gaps_llm responses are cached in
-data/processed/correlation_diagnose_cache.json so reruns are essentially free.
+data/processed/correlation_diagnose_cache.json so reruns are essentially free
+(only the new 2024 evaluation year incurs 30 fresh gpt-4o gap-diagnostic calls).
 
-Scope note: defensive data only exists for 2024 in our dataset, so this run is
-offense + pitching only. The defense/combined ablation is queued for a future
-expansion that pulls historical OAA for 2019-2023.
+Defensive scope: OAA + sprint speed + catcher pop are now available for all
+2019-2025 (Entry 7 + the June 1 2026 refresh that added 2025). The ablation
+table reports offense-only, defense-only, and combined gap scores.
 """
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ from core.orchestrator import (                                # noqa: E402
     diagnose_gaps_llm,
 )
 
-EVAL_YEARS = [2019, 2020, 2021, 2022, 2023]   # gap scored at end of each
+EVAL_YEARS = [2019, 2020, 2021, 2022, 2023, 2024]   # gap scored at end of each
 CACHE_PATH = DATA_PROC / "correlation_diagnose_cache.json"
 
 # Map our 3-letter abbreviations to Baseball Reference full names so we can
@@ -86,6 +87,8 @@ def _alt_team_names(full_name: str) -> list[str]:
         aliases.append("Cleveland Indians")
     if full_name == "Oakland Athletics":
         aliases.append("Oakland A's")
+        # 2025 rebrand: bref dropped the city prefix after the team's move
+        aliases.append("Athletics")
     return aliases
 
 
