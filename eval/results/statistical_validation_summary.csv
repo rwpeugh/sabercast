@@ -1,0 +1,7 @@
+test,result,verdict
+6.3.1 Headline gap_score correlation significantly different from zero?,"r=-0.058, p=0.436",NOT SIGNIFICANT — underpowered
+6.3.2 Does Sabercast beat last-year-wins baseline at predicting next-year wins?,"baseline |r|=0.573, Sabercast |r|=0.073, Sabercast(combined) |r|=0.003 (all excl. COVID)","NO — Sabercast does not beat last-year-wins baseline; gap_score is a diagnostic surface, not a wins forecaster"
+6.3.3 Top-1 flagged position underperforms next year above 50% chance?,"precision=62.8% (n=172), binom p=0.001",YES — flagged positions underperform above chance
+6.3.4 Does gap_score work better in small/mid markets (our target user)?,see correlation_by_market_tier.csv,see report — qualitative
+6.3.5 Does signal strengthen over time (compounding contract pool)?,see correlation_by_year_significance.csv,see report — qualitative
+6.3.6 Is the fine-tune contract MAE improvement statistically significant?,"ex-Ohtani delta=$+0.58M, wilcoxon p=0.479, sign-test p=0.359","NOT SIGNIFICANT — CI [-0.35, +1.52]M includes zero"

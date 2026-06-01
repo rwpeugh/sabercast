@@ -1,0 +1,181 @@
+year,team,top_gap_position,next_year,underperformed,note
+2019,ARI,RF,2020,True,team OAA -2.0 vs league -0.4
+2019,ATL,2B,2020,False,team OAA +2.5 vs league -0.1
+2019,BAL,SP,2020,True,team SP ERA 4.42 vs league 4.03
+2019,BOS,SS,2020,True,team OAA -3.0 vs league +1.0
+2019,CHC,LF,2020,True,team OAA -2.0 vs league -0.5
+2019,CIN,CF,2020,True,team OAA +0.0 vs league +1.4
+2019,CLE,2B,2020,False,team OAA +3.0 vs league -0.1
+2019,COL,SP,2020,False,team SP ERA 3.84 vs league 4.03
+2019,CWS,LF,2020,True,team OAA -3.0 vs league -0.5
+2019,DET,RF,2020,False,team OAA +1.0 vs league -0.4
+2019,HOU,3B,2020,False,team OAA +1.0 vs league +0.6
+2019,KC,3B,2020,True,team OAA -1.0 vs league +0.6
+2019,LAA,CF,2020,True,team OAA -1.0 vs league +1.4
+2019,LAD,CF,2020,False,team OAA +7.0 vs league +1.4
+2019,MIA,CF,2020,,team Marlins not in oaa pos=CF year=2020
+2019,MIL,2B,2020,True,team OAA -2.0 vs league -0.1
+2019,MIN,SS,2020,True,team OAA +0.0 vs league +1.0
+2019,NYM,SS,2020,False,team OAA +2.5 vs league +1.0
+2019,NYY,SS,2020,True,team OAA -2.0 vs league +1.0
+2019,OAK,CF,2020,False,team OAA +2.0 vs league +1.4
+2019,PHI,SS,2020,True,team OAA -8.0 vs league +1.0
+2019,PIT,3B,2020,False,team OAA +4.0 vs league +0.6
+2019,SD,SS,2020,False,team OAA +6.0 vs league +1.0
+2019,SEA,LF,2020,True,team OAA -2.0 vs league -0.5
+2019,SF,CF,2020,False,team OAA +3.0 vs league +1.4
+2019,STL,RF,2020,False,team OAA +0.0 vs league -0.4
+2019,TB,1B,2020,True,team OAA -3.0 vs league -0.6
+2019,TEX,LF,2020,True,team OAA -1.0 vs league -0.5
+2019,TOR,3B,2020,True,team OAA -2.0 vs league +0.6
+2019,WSH,2B,2020,True,team OAA -3.5 vs league -0.1
+2020,ARI,RF,2021,False,team OAA +0.5 vs league -0.4
+2020,ATL,3B,2021,True,team OAA -3.0 vs league +0.3
+2020,BAL,2B,2021,False,team OAA +5.0 vs league +1.4
+2020,BOS,3B,2021,True,team OAA -13.0 vs league +0.3
+2020,CHC,3B,2021,False,team OAA +3.0 vs league +0.3
+2020,CIN,SS,2021,False,team OAA +5.0 vs league +0.8
+2020,CLE,RF,2021,True,team OAA -1.0 vs league -0.4
+2020,COL,SP,2021,True,team SP ERA 4.47 vs league 4.40
+2020,CWS,LF,2021,True,team OAA -2.5 vs league -1.6
+2020,DET,3B,2021,True,team OAA +0.0 vs league +0.3
+2020,HOU,2B,2021,False,team OAA +2.0 vs league +1.4
+2020,KC,3B,2021,True,team OAA -8.0 vs league +0.3
+2020,LAA,RF,2021,False,team OAA +0.0 vs league -0.4
+2020,LAD,1B,2021,False,team OAA +7.0 vs league +0.2
+2020,MIA,1B,2021,False,team OAA +2.0 vs league +0.2
+2020,MIL,2B,2021,True,team OAA +0.0 vs league +1.4
+2020,MIN,2B,2021,True,team OAA -2.0 vs league +1.4
+2020,NYM,1B,2021,False,team OAA +3.0 vs league +0.2
+2020,NYY,CF,2021,True,team OAA +0.0 vs league +3.5
+2020,OAK,SS,2021,False,team OAA +5.0 vs league +0.8
+2020,PHI,SS,2021,True,team OAA -18.0 vs league +0.8
+2020,PIT,CF,2021,False,team OAA +11.0 vs league +3.5
+2020,SD,1B,2021,False,team OAA +1.0 vs league +0.2
+2020,SEA,2B,2021,True,team OAA +0.7 vs league +1.4
+2020,SF,RF,2021,False,team OAA +2.0 vs league -0.4
+2020,STL,SS,2021,False,team OAA +3.0 vs league +0.8
+2020,TB,1B,2021,True,team OAA +0.0 vs league +0.2
+2020,TEX,SS,2021,True,team OAA -6.0 vs league +0.8
+2020,TOR,SP,2021,False,team SP ERA 3.68 vs league 4.40
+2020,WSH,2B,2021,True,team OAA -6.0 vs league +1.4
+2021,ARI,CF,2022,False,team OAA +7.0 vs league +3.2
+2021,ATL,3B,2022,True,team OAA -5.0 vs league +1.0
+2021,BAL,SP,2022,True,team SP ERA 4.18 vs league 4.08
+2021,BOS,3B,2022,True,team OAA -2.0 vs league +1.0
+2021,CHC,CF,2022,True,team OAA -1.0 vs league +3.2
+2021,CIN,2B,2022,True,team OAA -10.0 vs league +1.3
+2021,CLE,SS,2022,True,team OAA -9.0 vs league +1.3
+2021,COL,RF,2022,True,team OAA -2.3 vs league -0.8
+2021,CWS,LF,2022,False,team OAA -1.0 vs league -1.8
+2021,DET,SS,2022,True,team OAA +1.0 vs league +1.3
+2021,HOU,CF,2022,False,team OAA +7.0 vs league +3.2
+2021,KC,3B,2022,,team Royals not in oaa pos=3B year=2022
+2021,LAA,3B,2022,False,team OAA +1.0 vs league +1.0
+2021,LAD,SS,2022,True,team OAA -1.0 vs league +1.3
+2021,MIA,SS,2022,False,team OAA +10.0 vs league +1.3
+2021,MIL,SS,2022,False,team OAA +10.0 vs league +1.3
+2021,MIN,1B,2022,True,team OAA -1.5 vs league -1.2
+2021,NYM,LF,2022,True,team OAA -2.0 vs league -1.8
+2021,NYY,SS,2022,True,team OAA -4.0 vs league +1.3
+2021,OAK,CF,2022,False,team OAA +6.0 vs league +3.2
+2021,PHI,SS,2022,True,team OAA -1.0 vs league +1.3
+2021,PIT,1B,2022,False,team OAA -1.0 vs league -1.2
+2021,SD,LF,2022,True,team OAA -4.0 vs league -1.8
+2021,SEA,RF,2022,False,team OAA +2.0 vs league -0.8
+2021,SF,LF,2022,True,team OAA -9.0 vs league -1.8
+2021,STL,RF,2022,False,team OAA +1.0 vs league -0.8
+2021,TB,2B,2022,True,team OAA -3.0 vs league +1.3
+2021,TEX,SS,2022,False,team OAA +4.0 vs league +1.3
+2021,TOR,LF,2022,True,team OAA -3.0 vs league -1.8
+2021,WSH,3B,2022,False,team OAA +1.5 vs league +1.0
+2022,ARI,3B,2023,True,team OAA +1.0 vs league +1.7
+2022,ATL,RF,2023,True,team OAA -7.0 vs league -0.5
+2022,BAL,2B,2023,True,team OAA -7.5 vs league +0.8
+2022,BOS,1B,2023,True,team OAA -10.0 vs league -1.1
+2022,CHC,3B,2023,False,team OAA +2.0 vs league +1.7
+2022,CIN,2B,2023,True,team OAA -6.0 vs league +0.8
+2022,CLE,SS,2023,,team Guardians not in oaa pos=SS year=2023
+2022,COL,SP,2023,True,team SP ERA 5.80 vs league 4.47
+2022,CWS,RF,2023,True,team OAA -1.5 vs league -0.5
+2022,DET,3B,2023,,team Tigers not in oaa pos=3B year=2023
+2022,HOU,1B,2023,True,team OAA -6.0 vs league -1.1
+2022,KC,SS,2023,False,team OAA +13.0 vs league +2.1
+2022,LAA,2B,2023,False,team OAA +1.0 vs league +0.8
+2022,LAD,3B,2023,True,team OAA -9.0 vs league +1.7
+2022,MIA,CF,2023,True,team OAA +4.0 vs league +4.7
+2022,MIL,2B,2023,False,team OAA +2.0 vs league +0.8
+2022,MIN,2B,2023,True,team OAA -3.0 vs league +0.8
+2022,NYM,1B,2023,False,team OAA +0.0 vs league -1.1
+2022,NYY,SS,2023,True,team OAA +1.0 vs league +2.1
+2022,OAK,3B,2023,,team Athletics not in oaa pos=3B year=2023
+2022,PHI,LF,2023,True,team OAA -18.0 vs league -2.1
+2022,PIT,SS,2023,True,team OAA -6.0 vs league +2.1
+2022,SD,LF,2023,True,team OAA -7.0 vs league -2.1
+2022,SEA,SS,2023,True,team OAA -9.0 vs league +2.1
+2022,SF,LF,2023,,team Giants not in oaa pos=LF year=2023
+2022,STL,2B,2023,True,team OAA -2.0 vs league +0.8
+2022,TB,SS,2023,False,team OAA +11.0 vs league +2.1
+2022,TEX,1B,2023,False,team OAA +5.0 vs league -1.1
+2022,TOR,SS,2023,True,team OAA -3.0 vs league +2.1
+2022,WSH,SS,2023,True,team OAA -9.0 vs league +2.1
+2023,ARI,SP,2024,True,team SP ERA 4.20 vs league 4.18
+2023,ATL,2B,2024,True,team OAA -2.0 vs league +1.7
+2023,BAL,2B,2024,True,team OAA +0.0 vs league +1.7
+2023,BOS,1B,2024,True,team OAA -2.0 vs league -1.2
+2023,CHC,LF,2024,False,team OAA -1.0 vs league -1.6
+2023,CIN,2B,2024,True,team OAA +1.0 vs league +1.7
+2023,CLE,SS,2024,False,team OAA +5.0 vs league +2.2
+2023,COL,SP,2024,True,team SP ERA 4.74 vs league 4.18
+2023,CWS,LF,2024,True,team OAA -5.0 vs league -1.6
+2023,DET,1B,2024,False,team OAA +1.0 vs league -1.2
+2023,HOU,1B,2024,True,team OAA -7.0 vs league -1.2
+2023,KC,RF,2024,True,team OAA -5.0 vs league -1.1
+2023,LAA,SS,2024,True,team OAA -5.0 vs league +2.2
+2023,LAD,2B,2024,True,team OAA -2.0 vs league +1.7
+2023,MIA,2B,2024,False,team OAA +16.0 vs league +1.7
+2023,MIL,C,2024,False,team pop 1.95s vs league 1.96s
+2023,MIN,1B,2024,False,team OAA +15.0 vs league -1.2
+2023,NYM,3B,2024,True,team OAA -2.0 vs league -0.2
+2023,NYY,2B,2024,True,team OAA -5.0 vs league +1.7
+2023,OAK,SP,2024,True,team SP ERA 4.66 vs league 4.18
+2023,PHI,LF,2024,False,team OAA -1.0 vs league -1.6
+2023,PIT,SS,2024,True,team OAA -3.0 vs league +2.2
+2023,SD,LF,2024,True,team OAA -5.0 vs league -1.6
+2023,SEA,SS,2024,True,team OAA +1.0 vs league +2.2
+2023,SF,CF,2024,True,team OAA -3.0 vs league +5.0
+2023,STL,RF,2024,False,team OAA +2.0 vs league -1.1
+2023,TB,1B,2024,True,team OAA -3.0 vs league -1.2
+2023,TEX,SS,2024,False,team OAA +5.0 vs league +2.2
+2023,TOR,1B,2024,True,team OAA -10.0 vs league -1.2
+2023,WSH,SS,2024,True,team OAA -18.0 vs league +2.2
+2024,ARI,SP,2025,True,team SP ERA 4.53 vs league 4.21
+2024,ATL,2B,2025,True,team OAA -4.0 vs league +0.2
+2024,BAL,3B,2025,False,team OAA +2.0 vs league +0.7
+2024,BOS,2B,2025,True,team OAA -3.0 vs league +0.2
+2024,CHC,3B,2025,True,team OAA -1.0 vs league +0.7
+2024,CIN,3B,2025,False,team OAA +3.0 vs league +0.7
+2024,CLE,CF,2025,True,team OAA -4.0 vs league +4.5
+2024,COL,SP,2025,True,team SP ERA 6.11 vs league 4.21
+2024,CWS,1B,2025,,team White Sox not in oaa pos=1B year=2025
+2024,DET,2B,2025,True,team OAA -5.0 vs league +0.2
+2024,HOU,2B,2025,True,team OAA +0.0 vs league +0.2
+2024,KC,LF,2025,,team Royals not in oaa pos=LF year=2025
+2024,LAA,SS,2025,True,team OAA -7.0 vs league +2.0
+2024,LAD,LF,2025,True,team OAA -8.0 vs league -1.8
+2024,MIA,SS,2025,False,team OAA +4.0 vs league +2.0
+2024,MIL,1B,2025,False,team OAA +1.0 vs league -0.6
+2024,MIN,2B,2025,False,team OAA +0.5 vs league +0.2
+2024,NYM,1B,2025,True,team OAA -9.0 vs league -0.6
+2024,NYY,2B,2025,False,team OAA +8.0 vs league +0.2
+2024,OAK,LF,2025,False,team OAA +0.0 vs league -1.8
+2024,PHI,RF,2025,True,team OAA -12.0 vs league -1.3
+2024,PIT,LF,2025,False,team OAA -1.0 vs league -1.8
+2024,SD,LF,2025,True,team OAA -5.0 vs league -1.8
+2024,SEA,2B,2025,True,team OAA -5.0 vs league +0.2
+2024,SF,CF,2025,True,team OAA -5.0 vs league +4.5
+2024,STL,2B,2025,True,team OAA -1.5 vs league +0.2
+2024,TB,SS,2025,True,team OAA +1.0 vs league +2.0
+2024,TEX,RF,2025,False,team OAA +1.0 vs league -1.3
+2024,TOR,1B,2025,True,team OAA -2.0 vs league -0.6
+2024,WSH,SS,2025,True,team OAA -11.0 vs league +2.0

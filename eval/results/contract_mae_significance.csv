@@ -1,0 +1,2 @@
+pooled_n,pooled_mean_delta_M,pooled_ci_low_M,pooled_ci_high_M,wilcoxon_W,wilcoxon_p,sign_test_n_pos,sign_test_n_nonzero,sign_test_p,ex_ohtani_n,ex_ohtani_mean_delta_M,ex_ohtani_ci_low_M,ex_ohtani_ci_high_M
+26,-0.4,-2.81,1.28,77.5,0.4791,12,19,0.3593,25,0.58,-0.35,1.52
