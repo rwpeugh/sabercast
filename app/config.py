@@ -19,20 +19,44 @@ DATA_PROC    = PROJECT_ROOT / "data" / "processed"
 
 # ── OpenAI key loader ────────────────────────────────────────────────────────
 def get_openai_api_key() -> str:
-    """Return the OpenAI API key from env or a local OpenAIKey.txt file.
+    """Return the OpenAI API key from any supported location.
 
-    Search order: OPENAI_API_KEY env var, then OpenAIKey.txt in the project root,
-    then OpenAIKey.txt one directory up (matches the existing notebook layout).
+    Search order:
+      1. ``OPENAI_API_KEY`` environment variable (local dev, most CI setups).
+      2. ``st.secrets["OPENAI_API_KEY"]`` if running under Streamlit. Streamlit
+         Cloud reads secrets from the dashboard's Secrets pane and exposes them
+         here; it does NOT always propagate them as env vars.
+      3. ``OpenAIKey.txt`` in the project root.
+      4. ``OpenAIKey.txt`` one directory up (matches the existing notebook layout).
     """
+    # 1. Env var
     key = os.environ.get("OPENAI_API_KEY", "").strip()
     if key:
         return key
 
+    # 2. Streamlit secrets — Streamlit Cloud's documented secret mechanism.
+    # Guarded so this module remains importable from non-Streamlit contexts
+    # (pipelines, eval scripts, smoke tests).
+    try:
+        import streamlit as st  # noqa: PLC0415
+        # ``st.secrets`` is a dict-like proxy; "in" check avoids a KeyError
+        # when secrets aren't configured (local dev without secrets.toml).
+        if "OPENAI_API_KEY" in st.secrets:
+            secret_key = str(st.secrets["OPENAI_API_KEY"]).strip()
+            if secret_key:
+                return secret_key
+    except Exception:
+        # streamlit not installed, or no secrets configured — fall through
+        pass
+
+    # 3 + 4. Local files
     for candidate in (PROJECT_ROOT / "OpenAIKey.txt", PARENT_DIR / "OpenAIKey.txt"):
         if candidate.exists():
             return candidate.read_text(encoding="utf-8").strip()
 
     raise RuntimeError(
-        "OpenAI API key not found. Set OPENAI_API_KEY or place the key in "
+        "OpenAI API key not found. On Streamlit Cloud, set OPENAI_API_KEY in "
+        "the app's Secrets pane (Manage app → Settings → Secrets). Locally, "
+        "set the OPENAI_API_KEY environment variable or place the key in "
         "OpenAIKey.txt in the sabercast/ folder or its parent."
     )
