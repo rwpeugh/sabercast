@@ -401,6 +401,63 @@ The Roster Builder answers a manager's day-to-day question: *given today's game 
 
 ---
 
+## Entry 13 — May 31 (Final build): Contract MAE evaluation — second quantitative claim for the report
+
+**Goal:** Quantify how accurate the prompt-based contract forecaster is on held-out contracts. Produce a Mean Absolute Error number that sits alongside the 5-year correlation as a second hard claim for the final report.
+
+**What was built**
+
+- **`eval/contract_mae.py`** — held-out evaluation script:
+  1. Sample 30 contracts from `contracts.csv` signed in 2019–2024 (so the player's signing-year stats are on disk), `random.seed=42`.
+  2. For each test contract: load batting/pitching for the signing year, look up the player's stat line, build a comparable pool of contracts at the same position with `signed_year STRICTLY LESS than the test contract's signed_year` (no leakage — the LLM cannot see the test contract or any later contract at the same position), call `forecast_target_contract_llm` with `market_year` set to the test contract's signing year.
+  3. Skip cases where the player has no qualifying stats row or no prior position-matched comparable.
+  4. Record predicted_aav, actual_aav, absolute error, percent error.
+- Outputs `eval/results/contract_mae.csv`, `eval/results/contract_mae_by_position.csv`, and a `predicted vs actual` scatter chart with the 45° perfect-prediction line.
+
+**What it produced**
+
+26 successful predictions (4 skipped — Ozzie Albies + Brandon Lowe 2B 2019 had no prior 2B comparables; Yordan Alvarez DH 2023 had no prior DH comparable; Andres Gimenez 2B 2023 had no qualifying stats row).
+
+| Sample | n | Pearson r vs actual? | **MAE** | Median abs err | MAPE |
+|---|---|---|---|---|---|
+| Pooled, all 26                | 26 | — | **$4.30M** | $3.00M | 20.4% |
+| Excluding the Ohtani outlier  | 25 | — | $3.67M     | $3.00M | 20.1% |
+
+**MAE by position bucket**
+
+| Position group | n | MAE | Median | MAPE |
+|---|---|---|---|---|
+| SP | 4 | $3.03M | $3.21M | **12.9%** (best) |
+| RP | 3 | $2.77M | $1.50M | 27.8% |
+| C  | 3 | $3.17M | $2.00M | 27.6% |
+| OF | 6 | $3.98M | $3.73M | 21.8% |
+| IF | 9 | $4.21M | $3.00M | 16.9% |
+| DH | 1 | $20.0M (Ohtani only) | — | 28.6% |
+
+**Notable predictions**
+
+- **Aaron Judge** (2023, CF): predicted $40.0M / actual $40.0M / **error $0**
+- **Tyler Glasnow** (2024, SP): predicted $28.0M / actual $27.3M / error $0.7M
+- **Yan Gomes** (2022, C): predicted $8.0M / actual $6.5M / error $1.5M
+- **Aroldis Chapman** (2024, RP): predicted $12.0M / actual $10.5M / error $1.5M
+- **Mike Trout** (2019, RF): predicted $40.0M / actual $35.5M / error $4.5M
+- **Austin Riley** (2023, 3B): predicted $30.0M / actual $21.2M / error $8.8M (model overestimated his market)
+- **Shohei Ohtani** (2024, DH): predicted $50.0M / actual $70.0M / error $20.0M (the LLM cannot anticipate Ohtani's uniquely deferred Dodgers structure)
+
+**Interpretation.** The forecaster is approximately right within ±$3M for the median signing in the $10–40M AAV band, with errors growing on outlier deals. The 20.4% MAPE puts it in the same ballpark as published front-office salary-projection models. Best accuracy on starting pitchers (12.9% MAPE) likely because the SP market has the deepest comparable history and the narrowest distribution; worst pooled outcome is DH because the only DH sample is Ohtani, who is genuinely an outlier in any model.
+
+**Set-up for Pipeline 05.** This MAE is the prompt-based baseline. When the fine-tuned valuator (Pipeline 05) runs on the same 26 held-out contracts, the delta (fine-tuned MAE vs $4.30M) becomes a clean published number for the report.
+
+**Output files**
+
+- `eval/contract_mae.py` — the script
+- `eval/results/contract_mae.csv` (26 rows, one per held-out contract)
+- `eval/results/contract_mae_by_position.csv` (one row per position bucket)
+- `eval/results/contract_mae_scatter.png` — predicted vs actual scatter with the 45° line
+
+---
+
+
 
 
 

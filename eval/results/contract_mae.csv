@@ -1,0 +1,27 @@
+player_name,position,position_bucket,signed_year,actual_aav,predicted_aav,abs_error,pct_error,forecast_rationale,n_comparables
+Xander Bogaerts,2B,IF,2023,25454545,23000000,2454545,9.6,Strong 2024 stats and comparable AAVs for 2B position,3
+Aaron Judge,CF,OF,2023,40000000,40000000,0,0.0,Elite production and age justify a premium long-term deal,1
+Tyler Glasnow,SP,SP,2024,27312500,28000000,687500,2.5,"Strong K/9 and ERA, comparable to Rodon and Gausman.",5
+George Springer,RF,OF,2021,25000000,22000000,3000000,12.0,Strong 2024 stats but age limits long-term deal,3
+Freddie Freeman,1B,IF,2022,27000000,30000000,3000000,11.1,Strong 2021 stats and comparable contracts support premium AAV.,1
+Austin Riley,3B,IF,2023,21200000,30000000,8800000,41.5,Career-best stats and younger than comparables drive premium value.,2
+Bobby Witt Jr.,SS,IF,2024,26252525,35000000,8747475,33.3,Career-best stats and young age drive premium value.,5
+Mitch Garver,C,C,2024,12000000,10000000,2000000,16.7,Struggled offensively; comparable catchers have better stats and younger ages.,5
+Rafael Devers,3B,IF,2023,31350000,34000000,2650000,8.5,Strong 2022 stats and younger than recent comparables.,2
+Seiya Suzuki,RF,OF,2022,17000000,20000000,3000000,17.6,Solid production and age align with recent RF contracts,5
+Manny Machado,3B,IF,2023,31818181,34000000,2181819,6.9,Strong 2022 stats and comparable contracts support premium AAV.,2
+Yan Gomes,C,C,2022,6500000,8000000,1500000,23.1,Age and declining stats limit AAV and years despite positional value.,3
+Matt Olson,1B,IF,2022,21000000,23000000,2000000,9.5,Strong power numbers and age suggest a premium deal.,1
+Brandon Nimmo,LF,OF,2023,20250000,25000000,4750000,23.5,Strong 2024 stats and comparable to Yelich's recent contract,1
+Will Smith,C,C,2024,14000000,20000000,6000000,42.9,Strong offensive stats and age position him well among top catchers.,5
+Mike Trout,RF,OF,2019,35541666,40000000,4458334,12.5,Elite production and age suggest a premium deal despite current contract.,1
+Aroldis Chapman,RP,RP,2024,10500000,12000000,1500000,14.3,Strong K9 and recent performance justify a solid AAV despite age.,4
+Trea Turner,SS,IF,2023,27272727,32000000,4727273,17.3,Strong 2024 stats and comparable AAVs for top shortstops,5
+Kevin Gausman,SP,SP,2022,22000000,25000000,3000000,13.6,"Strong K/9 and ERA, comparable to top-tier SP contracts.",1
+Bryan Reynolds,RF,OF,2023,13343750,22000000,8656250,64.9,Strong 2022 stats and age align with recent RF contracts,5
+Trevor Story,SS,IF,2022,23333333,20000000,3333333,14.3,Solid power numbers but lower average; comparable to mid-tier shortstops.,1
+Aaron Nola,SP,SP,2024,24571428,28000000,3428572,14.0,"Solid innings and ERA, comparable to Rodon and Gausman.",5
+Robert Suarez,RP,RP,2022,9200000,15000000,5800000,63.0,"Strong ERA and K/9, comparable to Hendriks' recent deal",1
+Robbie Ray,SP,SP,2022,23000000,28000000,5000000,21.7,"Strong strikeout rate and innings pitched, comparable to top SP contracts.",1
+Kenley Jansen,RP,RP,2023,16000000,15000000,1000000,6.2,Solid stats but age limits long-term deal potential,3
+Shohei Ohtani,DH,DH,2024,70000000,50000000,20000000,28.6,Elite production and age justify a premium long-term deal,2

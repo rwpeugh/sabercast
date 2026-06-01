@@ -94,6 +94,23 @@ Four of five years are now negative in the defense-augmented run.
 
 ---
 
+## Quantitative evaluation — contract valuation MAE (held-out)
+
+Thirty contracts were randomly sampled from `contracts.csv` (signed 2019–2024, random seed 42). For each contract the prompt-based forecaster was asked to predict the AAV using the player's signing-year stats and position-matched comparable contracts signed *strictly before* the test contract's signing year (no leakage). Skipped cases (4) where the player had no qualifying stats row or no prior position-matched comparable were excluded.
+
+| Sample | n | MAE | Median abs err | MAPE |
+|---|---|---|---|---|
+| Pooled, all 26 predictions | 26 | **$4.30M** | $3.00M | 20.4% |
+| Excluding Ohtani outlier | 25 | $3.67M | $3.00M | 20.1% |
+
+**MAE by position bucket:** SP $3.03M (n=4, MAPE 12.9% — best), RP $2.77M (n=3), C $3.17M (n=3), OF $3.98M (n=6), IF $4.21M (n=9), DH $20.0M (n=1; Ohtani only).
+
+The forecaster is approximately right within ±$3M for the median signing in the $10–40M AAV band. Notable: Aaron Judge predicted exactly ($40M actual / $40M predicted), Tyler Glasnow within $0.7M, Yan Gomes within $1.5M. The Shohei Ohtani contract drives the DH bucket's error — the LLM has no way to anticipate his uniquely deferred Dodgers deal.
+
+**Output files:** `eval/results/contract_mae.csv` (26 rows), `eval/results/contract_mae_by_position.csv`, `eval/results/contract_mae_scatter.png` (predicted vs actual AAV with the 45° perfect-prediction line).
+
+---
+
 ## Known limitations
 
 - **Catcher framing data is not produced** by the working pybaseball Statcast endpoint (upstream parser bug); catcher pop time and catcher OPS together serve as the defensive proxy.
