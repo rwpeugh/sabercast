@@ -457,6 +457,63 @@ The Roster Builder answers a manager's day-to-day question: *given today's game 
 
 ---
 
+## Entry 14 — May 31 (Final build): Fine-tuning attempt and OpenAI platform deprecation finding
+
+**Goal:** Per the original spec, fine-tune `gpt-4o-mini-2024-07-18` on contract examples and compare the resulting MAE against the prompt-based baseline of $4.30M from Entry 13.
+
+**What was built**
+
+- **`pipelines/05a_finetune_submit.py`** — full submission pipeline:
+  1. Loads 115 contracts from `contracts.csv`, filters to 78 contracts signed in 2019–2024 (signing-year stats available).
+  2. Uses the same `random.seed(42)` test indices as `eval/contract_mae.py` so the 30-contract held-out evaluation set is identical and is **never seen during training**.
+  3. For each remaining training contract: loads signing-year batting/pitching CSVs, looks up the player's stats, builds a no-leakage comparable pool (same position, `signed_year STRICTLY LESS THAN` the target contract's signed year), and writes a `{system, user, assistant}` JSONL example. The system message is the existing `TARGET_FORECAST_SYSTEM` prompt; the user is the player + comparables payload; the assistant is the actual contract terms as labeled JSON.
+  4. Uploads the JSONL file to the OpenAI Files endpoint and attempts to submit a fine-tuning job against `gpt-4o-mini-2024-07-18` with suffix `sabercast-contract`.
+
+**What happened**
+
+The file upload succeeded:
+
+```
+uploaded file id: file-7xwbSqusuWMPCt9T4kVKjQ
+Training file size: 86.8 KB (~22K tokens)
+Estimated fine-tuning cost (1 epoch): $0.07
+```
+
+The job-creation call returned **HTTP 403**:
+
+```
+openai.PermissionDeniedError: Error code: 403 — {
+  'error': {
+    'message': 'OpenAI is winding down the fine-tuning platform and your
+     organization is no longer able to create new fine-tuning training jobs.
+     Learn more https://developers.openai.com/api/docs/deprecations#
+     update-to-openais-self-serve-fine-tuning',
+    'type':  'invalid_request_error',
+    'param': None,
+    'code':  'training_not_available'
+  }
+}
+```
+
+**Interpretation.** OpenAI is deprecating self-serve fine-tuning for new training jobs on at least this organization. The training data was built correctly, the file uploaded successfully, and the methodology was sound — the constraint is on OpenAI's platform side, not on our pipeline. This is the kind of real-world platform-deprecation issue that affects any production LLM application, and it is worth documenting as such in the final report.
+
+**Decision.** The prompt-based contract forecaster's pooled MAE of **$4.30M** (Entry 13) stands as the published valuation-accuracy number. Three alternative paths to fine-tuning exist for future work and are noted but not pursued in this build:
+
+1. Local fine-tuning of an open model (e.g., LoRA on a Llama 3 or Qwen variant), then host via Together AI / Hugging Face Inference for the runtime call. ~$50 + ~3 hours setup.
+2. Anthropic Claude fine-tuning if/when it opens to general access.
+3. Few-shot prompt augmentation — embed 5–10 high-quality example contracts in the system prompt instead of fine-tuning. This is a degenerate form of training that stays inside the existing prompt-based API.
+
+**Output artifacts kept** (evidence of the methodology, even though the job didn't run):
+
+- `pipelines/05a_finetune_submit.py` — the submission pipeline
+- `data/processed/finetune_train_2019_2024.jsonl` — 29 training examples in OpenAI chat fine-tuning format
+- The OpenAI files endpoint upload succeeded; the file id is recorded in this log but the file itself has not been retrieved back
+
+**Honest report angle.** The Sabercast valuation system uses prompt engineering rather than fine-tuning — a deliberate choice forced by the platform constraint encountered during the build, not a design preference. The $4.30M held-out MAE benchmarks the prompt-based approach; future work could pursue any of the three alternative fine-tuning paths above.
+
+---
+
+
 
 
 
