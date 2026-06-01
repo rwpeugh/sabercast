@@ -10,7 +10,6 @@ import streamlit as st
 
 from core.orchestrator import (
     TEAM_ABBR_TO_BREF,
-    TEAM_DEFAULT_PAYROLL,
     run_roster_builder_simple,
 )
 
@@ -30,21 +29,15 @@ def _leverage_chip(leverage: str) -> str:
     return f":{color}[**{str(leverage).upper()}**]"
 
 
-def _fmt_money(n: float | int | None) -> str:
-    if n is None:
-        return "—"
-    if abs(n) >= 1_000_000:
-        return f"${n/1_000_000:.1f}M"
-    return f"${n:,.0f}"
-
-
 def render() -> None:
     st.subheader("Roster Builder")
     st.caption(
-        "Pick a team and an opponent. The orchestrator aggregates the team's "
+        "Day-to-day lineup construction. Pick the team you're managing and the "
+        "opponent for an upcoming game. The orchestrator aggregates your "
         "qualified hitters and the opponent's top pitchers + per-position "
         "defensive deltas, then asks GPT-4o to construct a recommended 9-player "
-        "lineup with matchup-specific reasoning."
+        "lineup with matchup-specific reasoning. No payroll input — this tab "
+        "uses the existing roster as is."
     )
 
     evaluation_year = 2024
@@ -61,24 +54,16 @@ def render() -> None:
     with col2:
         # Default opponent: HOU unless team IS HOU, then NYY
         default_opp = "HOU" if team != "HOU" else "NYY"
+        opp_options = [t for t in teams_sorted if t != team]
         opponent = st.selectbox(
             "Opponent",
-            [t for t in teams_sorted if t != team],
-            index=[t for t in teams_sorted if t != team].index(default_opp)
-                  if default_opp in [t for t in teams_sorted if t != team] else 0,
+            opp_options,
+            index=opp_options.index(default_opp) if default_opp in opp_options else 0,
             key="roster_builder_opponent",
         )
     with col3:
-        default_budget = TEAM_DEFAULT_PAYROLL.get(team, 165_000_000)
-        budget = st.number_input(
-            f"Max payroll for {evaluation_year + 1} (USD)",
-            min_value=50_000_000, max_value=500_000_000,
-            value=default_budget, step=5_000_000,
-            help="Pre-filled with the selected team's 2025 default payroll. "
-                 "Budget context is currently displayed for reference only — "
-                 "lineup recommendations use 2024 stats regardless.",
-            key="roster_builder_budget",
-        )
+        st.markdown("**Scouting as of**")
+        st.markdown(f"end of **{evaluation_year}** season")
 
     if st.button("Build roster + matchup plan", type="primary"):
         cache = _get_cache()
@@ -98,7 +83,6 @@ def render() -> None:
 
                 result = run_roster_builder_simple(
                     team_abbr=team, opponent_abbr=opponent,
-                    max_budget=int(budget),
                     evaluation_year=evaluation_year,
                     progress=progress,
                 )

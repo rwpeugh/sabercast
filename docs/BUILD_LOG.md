@@ -382,6 +382,26 @@ Demo Day narrative: *"Pick any of 30 teams. Pick an opponent. Pick a payroll. Sa
 
 ---
 
+## Entry 12 — May 31 (Final build): Roster Builder design correction — drop payroll input
+
+**Goal:** Remove the max-payroll input from the Roster Builder tab. Day-to-day lineup construction uses the existing roster as is; payroll only matters on the Gap Filler tab where free-agent acquisitions are being evaluated. Mixing the two confuses what the tab is for.
+
+**What changed**
+
+- Removed the `Max payroll for 2025` `st.number_input` from `app/tabs/roster_builder.py`. The third column now shows the evaluation-year label ("end of 2024 season") instead.
+- Dropped `max_budget` from `run_roster_builder_simple`'s signature in `core/orchestrator.py`. Also removed the unused `max_budget` field from the return dict. The function is now cleanly scoped: *team + opponent + year → lineup + matchup plan*.
+- Updated the tab caption to make the intent explicit: *"Day-to-day lineup construction. Pick the team you're managing and the opponent for an upcoming game ... No payroll input — this tab uses the existing roster as is."*
+- Removed the unused `_fmt_money` helper and the `TEAM_DEFAULT_PAYROLL` import from `roster_builder.py`.
+
+**Why**
+
+The Roster Builder answers a manager's day-to-day question: *given today's game against this specific opponent, what is my best lineup?* That has nothing to do with the team's payroll. Payroll belongs on the Gap Filler tab, which answers a GM's offseason question: *what free agents should we sign within this budget?* Separating the inputs by tab keeps each tab's mental model clean.
+
+**Re-captured screenshots** (`07_roster_builder_top.png`, `08_roster_builder_lineup_and_matchup.png`) confirm the new layout. SEA-vs-HOU run is 4.83 s, one gpt-4o call, same lineup and matchup output as Entry 11 (the LLM didn't use the payroll number anyway).
+
+---
+
+
 
 
 

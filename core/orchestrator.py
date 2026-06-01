@@ -1165,11 +1165,11 @@ def build_roster_llm(team_abbr: str, opponent_abbr: str,
 
 def run_roster_builder_simple(team_abbr: str = "SEA",
                               opponent_abbr: str = "HOU",
-                              max_budget: float | None = None,
                               evaluation_year: int = 2024,
                               progress: ProgressCallback = None) -> dict:
-    """Sprint orchestrator for the Roster Builder tab.
+    """Day-to-day lineup construction for one game against one specific opponent.
 
+    Uses the team's existing 2024 roster — no payroll or free-agency input.
     Aggregates the team's top hitters (PA >= 200) and the opponent's top
     pitchers (IP >= 30), plus the opponent's per-position defensive deltas
     if Statcast data is available. One ``gpt-4o`` call returns a structured
@@ -1220,7 +1220,6 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
         "team":     team_abbr,
         "opponent": opponent_abbr,
         "year":     evaluation_year,
-        "max_budget": max_budget,
         "elapsed_seconds":  round(time.time() - t0, 2),
         "team_hitters":       team_hitters,
         "opponent_pitchers":  opponent_pitchers,
