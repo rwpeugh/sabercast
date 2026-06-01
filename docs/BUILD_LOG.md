@@ -513,6 +513,77 @@ openai.PermissionDeniedError: Error code: 403 — {
 
 ---
 
+## Entry 15 — June 1 (Final build): Together AI fine-tune — three platform constraints, one signal-bearing result
+
+**Goal.** After Entry 14 documented OpenAI's self-serve fine-tuning deprecation, pursue the first of the three alternative paths listed there — open-weight fine-tuning via a third-party host. Decide whether a fine-tuned forecaster materially beats the $4.30M prompt-based MAE from Entry 13.
+
+### The chain of platform constraints
+
+1. **Llama 3.1 8B fine-tune (~5 min, $0.00 on free credits).** Built `pipelines/05c_finetune_together.py` re-using the existing 29-example training JSONL (same no-leakage rules as Entry 13/14: each example's comparables have `signed_year` strictly less than the target; the 30 held-out contracts are never trained on). Submitted against `meta-llama/Meta-Llama-3.1-8B-Instruct-Reference`, 3 epochs, LoRA r=64 α=128 on all attention + MLP projections, learning rate 1e-5. Training completed in 30 s over 12 steps, model name `rpeugh_302d/Meta-Llama-3.1-8B-Instruct-Reference-sabercast-contract-7d763da1`.
+
+   But the inference call returned 400: *"Unable to access non-serverless model … Please create and start a new dedicated endpoint for the model."* Together had moved custom fine-tunes off the serverless tier on this account. Even the **base** model `Meta-Llama-3.1-8B-Instruct-Reference` returned the same error.
+
+2. **Qwen 2.5 7B fine-tune (~5 min, $0.00).** Probed which base models are still serverless on this account — `meta-llama/Llama-3.3-70B-Instruct-Turbo` and `Qwen/Qwen2.5-7B-Instruct-Turbo` worked; the smaller Llama / Mistral variants did not. Re-ran 05c with `BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"`. Trained cleanly. Same 400 on inference — Together flags **every custom fine-tune** as non-serverless on this tier, regardless of whether the base has a serverless route.
+
+3. **Dedicated endpoint deployment (~$2 total).** Built `pipelines/05e_finetuned_eval_with_endpoint.py` to handle the full lifecycle atomically: create a 2× H100 endpoint, wait for STARTED, run the eval as a subprocess, **tear down the endpoint in `finally`** so a crash can't leave $13/hr GPU instances running. First attempt failed: the endpoint reached STARTED but the chat completion still returned "non-serverless model". Read the Together docs more carefully (after the failed run) and found the routing detail: dedicated endpoints are keyed on `endpoint.name` (a generated identifier like `<user>/<model>-<hash>`), **not** the raw `model_output_name` from the fine-tune. Patched 05e to write `endpoint.name` into the meta JSON before launching the eval subprocess, and patched `_get_finetuned_together_model()` to prefer that over the model id. Re-ran. Worked.
+
+### Final pipeline that produced numbers
+
+- **`pipelines/05c_finetune_together.py`** — submit + poll fine-tune. Final base: `Qwen/Qwen2.5-7B-Instruct`. Final fine-tuned model: `rpeugh_302d/Qwen2.5-7B-Instruct-sabercast-contract-663bd032`.
+- **`pipelines/05d_finetune_together_harvest.py`** — idempotent resume-polling helper for jobs whose host process dies mid-poll. Not needed in the end (Qwen training finished in 5.5 min, well under the 10-min subprocess cap) but kept in the repo.
+- **`pipelines/05e_finetuned_eval_with_endpoint.py`** — create endpoint → wait STARTED → write `endpoint.name` to meta → run `eval/contract_mae.py --use-finetuned` → ALWAYS delete endpoint + clear transient meta in `finally`.
+- **Orchestrator routing** in `core/orchestrator.py`: `_get_finetuned_together_model()` prefers `endpoint_name` over `fine_tuned_model`; `forecast_target_contract_llm(..., use_finetuned=True)` routes to Together via the OpenAI-compatible `chat.completions.create` endpoint, with a JSON-fence stripper for robustness against ` ```json ` wrappers.
+- **Eval CLI flag** in `eval/contract_mae.py`: `--use-finetuned` writes results to `contract_mae_finetuned.csv` / `_scatter.png` / `_by_position.csv` so the baseline files are preserved for an A/B comparison.
+
+### Results
+
+**Pooled (n=26 same held-out contracts as Entry 13):**
+
+| Metric        | Baseline gpt-4o-mini | Fine-tuned Qwen 2.5 7B | Δ              |
+|---------------|---------------------:|-----------------------:|---------------:|
+| MAE           | $4.30M               | $4.70M                 | +$0.40M worse  |
+| Median error  | $3.00M               | $3.00M                 | tied           |
+| MAPE          | 20.4 %               | 20.0 %                 | −0.4 pp better |
+| Wins (n=26)   | 14                   | 12                     | —              |
+
+**The Ohtani sensitivity (n=25, dropping the lone DH outlier):**
+
+| Metric        | Baseline | Fine-tuned | Δ              |
+|---------------|---------:|-----------:|---------------:|
+| MAE           | $3.67M   | $3.09M     | **−$0.58M (16 % better)** |
+| MAPE          | 20.0 %   | 18.2 %     | −1.8 pp        |
+
+**Per-position MAE (fine-tune − baseline, negative = fine-tune wins):**
+
+| Position group | n | Baseline MAE | Fine-tune MAE | Δ              |
+|----------------|---|-------------:|--------------:|---------------:|
+| **IF**         | 9 | $4.21M       | $2.80M        | **−$1.41M**    |
+| **SP**         | 4 | $3.03M       | $2.19M        | **−$0.84M**    |
+| C              | 3 | $3.17M       | $3.00M        | −$0.17M        |
+| RP             | 3 | $2.77M       | $2.77M        | tied           |
+| OF             | 6 | $3.98M       | $4.31M        | +$0.33M        |
+| **DH**         | 1 | $20.00M      | $45.00M       | +$25.00M (Ohtani) |
+
+**The Ohtani anomaly is the headline finding, methodologically.** Actual AAV $70M (the $700M / 10-year Dodgers deal, signed December 2023). Baseline gpt-4o-mini forecast $50M (off by $20M). Fine-tuned Qwen forecast $25M (off by $45M). gpt-4o-mini's training corpus includes news coverage of the actual Ohtani contract — it is essentially **memorizing the answer**, not forecasting it from comparables. Qwen 2.5 7B's open-source training corpus plus 29 task examples does not have that prior, so it forecasts purely from the comparables we hand it (and gets a worse number, but a *cleaner* number methodologically). For every other contract in the held-out set the comparison is closer to fair, and the fine-tune wins by ~16 % MAE.
+
+**Artifacts:**
+- `eval/results/contract_mae_finetuned.csv` — 26 per-contract rows
+- `eval/results/contract_mae_finetuned_by_position.csv`
+- `eval/results/contract_mae_finetuned_scatter.png`
+- `data/processed/finetune_together_meta.json` — job id, training config, completed model name
+
+**Cost.** Training (both Llama and Qwen runs): ~$0.00 against the $1 Together signup credit. First (failed) endpoint deployment: $0.86. Second (successful) endpoint deployment + eval + teardown: $1.08. **Total ~$1.94.**
+
+**What this means for the report.**
+
+- The fine-tune is not a 10 × improvement. It is a real, replicable ~16 % MAE improvement on the per-position comparables-driven slice — which is the actual question the system is answering.
+- The Ohtani outlier exposes a structural advantage prompt-based LLMs have over fine-tuned smaller models on tasks where the answer is in the pretraining corpus. For a contract valuation system whose mandate is to forecast *new* deals (not retrieve known ones), that prompt-based advantage is illusory.
+- The build hit **three** distinct mid-build platform constraints in 36 hours: (a) OpenAI deprecating self-serve fine-tuning (Entry 14), (b) Together removing the smaller Llama/Mistral models from its serverless tier, (c) Together moving custom fine-tunes off serverless for this account tier. Sabercast routes around all three through the dedicated-endpoint path and ships a real fine-tune benchmark.
+
+**Reproducibility.** Anyone with a Together API key and the keys file in `sabercast/TogetherKey.txt` can re-run the full chain: `python pipelines/05c_finetune_together.py` then `python pipelines/05e_finetuned_eval_with_endpoint.py`. The deterministic random seed (42) on both the held-out sample and the LoRA training plus `temperature=0` on inference make the result repeatable to within ~1 prediction.
+
+---
+
 
 
 

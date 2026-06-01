@@ -1,0 +1,27 @@
+player_name,position,position_bucket,signed_year,actual_aav,predicted_aav,abs_error,pct_error,forecast_rationale,n_comparables
+Xander Bogaerts,2B,IF,2023,25454545,23000000,2454545,9.6,"Solid hitter, similar to Semien; age 30, slightly premium for position",3
+Aaron Judge,CF,OF,2023,40000000,35000000,5000000,12.5,"Strong year, CF premium, younger than comparables",1
+Tyler Glasnow,SP,SP,2024,27312500,25000000,2312500,8.5,"Solid ERA and K rate, similar to Carlos Rodon at comparable age",5
+George Springer,RF,OF,2021,25000000,20000000,5000000,20.0,"Solid hitter, younger than comparables, RF premium",3
+Freddie Freeman,1B,IF,2022,27000000,24000000,3000000,11.1,"Solid production, slightly older than Harper, market premium for 1B",1
+Austin Riley,3B,IF,2023,21200000,25000000,3800000,17.9,"Strong 2024 season, younger than comparables, 3B premium",2
+Bobby Witt Jr.,SS,IF,2024,26252525,30000000,3747475,14.3,"Strong hitting stats, young age, similar to Francisco Lindor",5
+Mitch Garver,C,C,2024,12000000,15000000,3000000,25.0,"Aging catcher with below-average offense, similar to Sean Murphy's deal.",5
+Rafael Devers,3B,IF,2023,31350000,30000000,1350000,4.3,"Strong 2022 performance, similar to Arenado's 2019 deal",2
+Seiya Suzuki,RF,OF,2022,17000000,15000000,2000000,11.8,"Comparable to George Springer's AAV and term, with similar age and position.",5
+Manny Machado,3B,IF,2023,31818181,30000000,1818181,5.7,"Solid production, age 30, comparable to Rendon and Arenado",2
+Yan Gomes,C,C,2022,6500000,1500000,5000000,76.9,Aging catcher with lower production; similar to Grandal's deal.,3
+Matt Olson,1B,IF,2022,21000000,20000000,1000000,4.8,"Solid production, younger than Harper, similar position value",1
+Brandon Nimmo,LF,OF,2023,20250000,25000000,4750000,23.5,"Strong recent production, similar age to comparables, LF scarcity",1
+Will Smith,C,C,2024,14000000,15000000,1000000,7.1,"Solid hitter, younger than comparables, similar to Sean Murphy in value and age",5
+Mike Trout,RF,OF,2019,35541666,38000000,2458334,6.9,"Top RF, career-best year, young, market premium",1
+Aroldis Chapman,RP,RP,2024,10500000,12000000,1500000,14.3,"Solid ERA, K rate, and recent IP; similar to Kenley Jansen's deal.",4
+Trea Turner,SS,IF,2023,27272727,30000000,2727273,10.0,"Strong hitting stats, similar to Lindor, with a younger age advantage",5
+Kevin Gausman,SP,SP,2022,22000000,25000000,3000000,13.6,"Solid recent performance, similar to Gerrit Cole's market in 2020.",1
+Bryan Reynolds,RF,OF,2023,13343750,20000000,6656250,49.9,"Solid hitter, younger than comparables, similar HR output to Betts, 6-year deal",5
+Trevor Story,SS,IF,2022,23333333,18000000,5333333,22.9,"Solid hitter, young age, similar position value to Tatis Jr.",1
+Aaron Nola,SP,SP,2024,24571428,25000000,428572,1.7,"Solid recent performance, age 30, comparable to Carlos Rodon",5
+Robert Suarez,RP,RP,2022,9200000,15000000,5800000,63.0,"Strong ERA, K rate; younger than comparables, RP premium",1
+Robbie Ray,SP,SP,2022,23000000,20000000,3000000,13.0,"Solid ERA, K rate, and innings; younger than Cole, shorter term",1
+Kenley Jansen,RP,RP,2023,16000000,15000000,1000000,6.2,"Ages 32-35 RP, 3.63 ERA, 10.5 K9 similar to Hendriks",3
+Shohei Ohtani,DH,DH,2024,70000000,25000000,45000000,64.3,"Outstanding hitting performance, positional scarcity, younger comparables",2

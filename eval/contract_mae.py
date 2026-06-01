@@ -15,13 +15,24 @@ Methodology:
      d. Compare the forecasted AAV to the actual contract AAV.
   3. Compute MAE pooled and by position group.
 
-Outputs:
+CLI flags:
+  --use-finetuned   Route the forecaster to the Together AI Llama-3.1-8B model
+                    fine-tuned by pipelines/05c. Results are written to
+                    contract_mae_finetuned.csv so the baseline file is preserved.
+
+Outputs (baseline run):
   eval/results/contract_mae.csv             — one row per held-out contract
   eval/results/contract_mae_scatter.png     — predicted vs actual AAV
   eval/results/contract_mae_by_position.csv — MAE broken down by position bucket
+
+Outputs (--use-finetuned run):
+  eval/results/contract_mae_finetuned.csv
+  eval/results/contract_mae_finetuned_scatter.png
+  eval/results/contract_mae_finetuned_by_position.csv
 """
 from __future__ import annotations
 
+import argparse
 import json
 import random
 import sys
@@ -97,6 +108,19 @@ def _pick_comparables(contracts: pd.DataFrame, test_position: str,
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--use-finetuned", action="store_true",
+        help="Route the forecaster to the Together AI fine-tuned model.",
+    )
+    args = parser.parse_args()
+
+    suffix = "_finetuned" if args.use_finetuned else ""
+    if args.use_finetuned:
+        print("=== Running with Together AI fine-tuned forecaster ===")
+    else:
+        print("=== Running with OpenAI gpt-4o-mini baseline forecaster ===")
+
     contracts = pd.read_csv(DATA_RAW / "contracts.csv", encoding="utf-8")
     print(f"Loaded {len(contracts)} contracts.")
 
@@ -153,6 +177,7 @@ def main() -> None:
             forecast = forecast_target_contract_llm(
                 player=player_dict, position=position,
                 comparables=comparables, market_year=signed_year,
+                use_finetuned=args.use_finetuned,
             )
         except Exception as e:                              # noqa: BLE001
             print(f"  [FAIL] {name} ({position}, {signed_year}): {type(e).__name__}: {e}")
@@ -187,7 +212,7 @@ def main() -> None:
         raise SystemExit("No predictions produced — aborting.")
 
     df = pd.DataFrame(rows)
-    out_csv = RESULTS_DIR / "contract_mae.csv"
+    out_csv = RESULTS_DIR / f"contract_mae{suffix}.csv"
     df.to_csv(out_csv, index=False, encoding="utf-8")
     print(f"\nSaved {out_csv} ({len(df)} predictions, {skipped} skipped)")
 
@@ -206,7 +231,7 @@ def main() -> None:
     ).reset_index()
     print("\nMAE by position bucket:")
     print(by_pos.to_string(index=False))
-    out_pos = RESULTS_DIR / "contract_mae_by_position.csv"
+    out_pos = RESULTS_DIR / f"contract_mae{suffix}_by_position.csv"
     by_pos.to_csv(out_pos, index=False, encoding="utf-8")
     print(f"Saved {out_pos}")
 
@@ -214,6 +239,8 @@ def main() -> None:
     df_plot = df.copy()
     df_plot["actual_aav_M"]    = df_plot["actual_aav"]    / 1e6
     df_plot["predicted_aav_M"] = df_plot["predicted_aav"] / 1e6
+    title_prefix = ("Fine-tuned forecaster" if args.use_finetuned
+                    else "Baseline gpt-4o-mini")
     fig = px.scatter(
         df_plot, x="actual_aav_M", y="predicted_aav_M",
         color="position_bucket",
@@ -221,7 +248,7 @@ def main() -> None:
         labels={"actual_aav_M": "Actual AAV ($M)",
                 "predicted_aav_M": "Forecast AAV ($M)",
                 "position_bucket": "Position group"},
-        title=(f"Held-out contract valuation — pooled MAE ${mae/1e6:.2f}M "
+        title=(f"{title_prefix} — pooled MAE ${mae/1e6:.2f}M "
                f"(n={len(df)} contracts signed 2019–2024)"),
     )
     # 45-degree perfect-prediction line
@@ -229,7 +256,7 @@ def main() -> None:
     fig.add_shape(type="line", x0=0, y0=0, x1=max_aav, y1=max_aav,
                   line=dict(color="gray", dash="dash"))
     fig.update_layout(width=900, height=650)
-    out_png = RESULTS_DIR / "contract_mae_scatter.png"
+    out_png = RESULTS_DIR / f"contract_mae{suffix}_scatter.png"
     fig.write_image(str(out_png))
     print(f"Saved {out_png}")
 

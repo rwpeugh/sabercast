@@ -458,6 +458,54 @@ def _client() -> OpenAI:
     return OpenAI(api_key=get_openai_api_key())
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Together AI fine-tuned forecaster routing (added Entry 15 — OpenAI deprecated
+# self-serve fine-tuning, so we trained a Llama 3.1 8B Instruct model on Together
+# and route the contract forecaster to it when use_finetuned=True. The default
+# OpenAI gpt-4o-mini path remains unchanged.)
+# ──────────────────────────────────────────────────────────────────────────────
+def _get_finetuned_together_model() -> str | None:
+    """Return the Together model identifier to use for inference.
+
+    Together's dedicated-endpoint routing is keyed on ``endpoint.name`` (set
+    when the endpoint is created), NOT on the raw fine-tuned model id from
+    ``model_output_name``. When pipelines/05e is running a deployed-endpoint
+    eval it writes the endpoint name to the meta JSON; we prefer that. If no
+    endpoint name is present we fall back to the model id (which only works
+    for serverless tiers — see BUILD_LOG Entry 15 for the routing story).
+    Returns None if the fine-tune did not complete.
+    """
+    meta_path = PROJECT_ROOT / "data" / "processed" / "finetune_together_meta.json"
+    if not meta_path.exists():
+        return None
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    if meta.get("status") != "completed":
+        return None
+    return meta.get("endpoint_name") or meta.get("fine_tuned_model")
+
+
+def _together_client():
+    """Lazy import of the together SDK + key loader. Mirrors _client()."""
+    import os
+    from together import Together
+    key = os.environ.get("TOGETHER_API_KEY", "").strip()
+    if not key:
+        for candidate in (PROJECT_ROOT / "TogetherKey.txt",
+                          PROJECT_ROOT.parent / "TogetherKey.txt"):
+            if candidate.exists():
+                key = candidate.read_text(encoding="utf-8").strip()
+                break
+    if not key:
+        raise RuntimeError(
+            "Together API key not found. Set TOGETHER_API_KEY env var or place "
+            "the key in TogetherKey.txt in the sabercast/ folder or its parent."
+        )
+    return Together(api_key=key)
+
+
 def diagnose_gaps_llm(team_abbr: str, team_bat: dict, team_pit: dict,
                       league_bat: dict, league_pit: dict,
                       delta_bat: dict, delta_pit: dict,
@@ -591,16 +639,23 @@ def scout_opponent_llm(opponent_abbr: str,
 
 def forecast_target_contract_llm(player: dict, position: str,
                                  comparables: list[dict],
-                                 market_year: int) -> dict:
-    """One gpt-4o-mini call per recommended target.
+                                 market_year: int,
+                                 use_finetuned: bool = False) -> dict:
+    """One forecast call per recommended target.
 
     Produces a forward-looking forecast of what THIS SPECIFIC PLAYER would
     command on a new free-agent deal in the ``market_year`` offseason — distinct
     from their current contract AAV. The premium flag compares this forecast
     (what it would actually cost to sign them) against the gap-fill estimate
     (what the role appears to be worth at market).
+
+    When ``use_finetuned=True`` and pipelines/05c_finetune_together.py has
+    completed, the call is routed to the Together AI Llama-3.1-8B model
+    fine-tuned on Sabercast's 29 contract examples. Otherwise the default
+    OpenAI gpt-4o-mini path is used. The user payload structure is identical
+    in both cases so the fine-tuned model sees inputs in the exact shape it
+    was trained on.
     """
-    oai = _client()
     # Use .replace() instead of .format() — the JSON example inside the prompt
     # contains literal {} characters that would collide with str.format().
     sys_prompt = (
@@ -608,6 +663,8 @@ def forecast_target_contract_llm(player: dict, position: str,
         .replace("{market_year}", str(market_year))
         .replace("{prior_year}",  str(market_year - 1))
     )
+    # Match the user payload built by pipelines/05a_finetune_submit.py so the
+    # fine-tuned model sees inputs in the same shape it learned from.
     user_payload = {
         "player_name": player["player_name"],
         "position":    position,
@@ -621,6 +678,46 @@ def forecast_target_contract_llm(player: dict, position: str,
         "position_comparables": comparables,
         "market_year":   market_year,
     }
+
+    if use_finetuned:
+        ft_model = _get_finetuned_together_model()
+        if not ft_model:
+            raise RuntimeError(
+                "use_finetuned=True but no completed Together fine-tune found. "
+                "Run pipelines/05c_finetune_together.py first."
+            )
+        # Together's chat.completions endpoint is OpenAI-compatible. We drop
+        # response_format/seed because not all Together-hosted models support
+        # them; the fine-tuned model emits JSON natively from training.
+        tg = _together_client()
+        resp = tg.chat.completions.create(
+            model=ft_model,
+            temperature=0,
+            max_tokens=512,
+            messages=[
+                {"role": "system", "content": sys_prompt},
+                {"role": "user",   "content": json.dumps(user_payload)},
+            ],
+        )
+        raw = resp.choices[0].message.content or ""
+        # Be tolerant of fine-tuned models that occasionally wrap JSON in
+        # ```json fences or add a trailing newline.
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:].lstrip()
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            # Salvage the JSON object substring if the model added prose
+            start = raw.find("{")
+            end   = raw.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                return json.loads(raw[start:end + 1])
+            raise
+
+    oai = _client()
     resp = oai.chat.completions.create(
         model=GPT4O_MINI,
         response_format={"type": "json_object"},

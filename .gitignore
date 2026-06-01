@@ -1,6 +1,7 @@
 # Secrets — never commit these
 .env
 OpenAIKey.txt
+TogetherKey.txt
 .streamlit/secrets.toml
 
 # Python noise

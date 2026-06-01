@@ -1,0 +1,12 @@
+{
+  "job_id": "ft-e9fd12f2-bac7",
+  "input_file_id": "file-72d0e5c0-c439-4025-929b-142b26dd94b5",
+  "base_model": "Qwen/Qwen2.5-7B-Instruct",
+  "n_epochs": 3,
+  "suffix": "sabercast-contract",
+  "submitted_at": 1780300109,
+  "n_examples": 29,
+  "fine_tuned_model": "rpeugh_302d/Qwen2.5-7B-Instruct-sabercast-contract-663bd032",
+  "completed_at": 1780300440,
+  "status": "completed"
+}
