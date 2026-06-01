@@ -1,0 +1,2 @@
+label,n_filled,filled_mean_delta,n_unfilled,unfilled_mean_delta,diff_wins,u_stat,u_p,verdict
+excl. COVID 2019+2020,39,1.9,81,-0.9,2.8,1733.5,0.3895,no significant difference in wins_delta between teams that filled vs. did not fill the top-1 flagged gap.
