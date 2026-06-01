@@ -266,6 +266,7 @@ def _aggregate_year(year: int):
 def main() -> None:
     cache = _load_cache()
     rows: list[dict] = []
+    per_gap_rows: list[dict] = []   # raw per-gap data for downstream re-aggregation
 
     for year in EVAL_YEARS:
         print(f"\n=== {year} ===")
@@ -323,6 +324,21 @@ def main() -> None:
                 "n_gaps_returned":  len(diag.get("gaps", [])),
                 "top_gap_position": (diag.get("gaps") or [{}])[0].get("position"),
             })
+            # Dump raw per-gap data for downstream re-aggregation (weighted vs unweighted etc.)
+            for rank, g in enumerate((diag.get("gaps") or [])[:3], start=1):
+                comp = g.get("gap_components") or {}
+                per_gap_rows.append({
+                    "year":               year,
+                    "team":               abbr,
+                    "gap_rank":           rank,
+                    "position":           g.get("position"),
+                    "gap_score":          float(g.get("gap_score") or 0),
+                    "gap_offense":        float(comp.get("offense") or 0),
+                    "gap_defense":        float(comp.get("defense") or 0),
+                    "win_impact":         g.get("win_impact"),
+                    "scarcity_weight":    POSITION_SCARCITY_WEIGHTS.get(g.get("position"), 1.0),
+                    "next_year_wins":     wins_next,
+                })
 
     if not rows:
         raise SystemExit("No (year, team) rows produced — aborting.")
@@ -331,6 +347,12 @@ def main() -> None:
     out_csv = RESULTS_DIR / "correlation_table.csv"
     df.to_csv(out_csv, index=False, encoding="utf-8")
     print(f"\nSaved {out_csv} ({len(df)} rows)")
+
+    # Per-gap raw data dump for downstream re-aggregation
+    pg_df = pd.DataFrame(per_gap_rows)
+    pg_out = RESULTS_DIR / "correlation_per_gap.csv"
+    pg_df.to_csv(pg_out, index=False, encoding="utf-8")
+    print(f"Saved {pg_out} ({len(pg_df)} per-gap rows)")
 
     # ── Pearson correlations (offense / defense / combined ablation) ────────
     print("\nCorrelations (Pearson r vs. next-year wins):")

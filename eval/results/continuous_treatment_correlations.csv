@@ -1,0 +1,3 @@
+subset,n,pearson_linear_r,pearson_linear_p,ci_linear_low,ci_linear_high,pearson_log_r,pearson_log_p,spearman_r,spearman_p
+all years,180,-0.0217,0.7721,-0.1115,0.0611,-0.0004,0.9959,-0.0021,0.9772
+excl. COVID,120,0.0036,0.9691,-0.1185,0.1256,0.1027,0.2644,0.0607,0.5104
