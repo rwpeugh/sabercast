@@ -1100,6 +1100,138 @@ def _top_pitchers(team_pit_df: pd.DataFrame, n: int = 5) -> list[dict]:
     ]
 
 
+ROSTER_BUILDER_SYSTEM = """You are an MLB game-strategy analyst helping a front office build the
+best starting lineup against a specific opponent. You receive:
+  * The team's qualified hitters (2024 stat lines, top 12 by OPS)
+  * The opponent's qualified pitchers (top 5 by ERA — a mix of starters and
+    relievers; you do not know which one will start, so reason about the staff
+    overall and the most likely starter by IP/GS)
+  * The opponent's per-position defensive deltas vs. league (where positive
+    OAA means the opponent's defense is above average and offense is harder
+    to find against them)
+
+Return STRICT JSON only, no prose, with this exact schema:
+
+{
+  "team": "<3-letter abbr>",
+  "opponent": "<3-letter abbr>",
+  "year": 2024,
+  "narrative": "<2-3 sentence strategic summary of how this team should attack this opponent>",
+  "recommended_lineup": [
+    {"order": <1-9>, "player_name": "<name>", "position": "<C|1B|2B|3B|SS|LF|CF|RF|DH>", "rationale": "<one short phrase, why this slot/order>"}
+  ],
+  "matchup_advantages": [
+    {"area": "<short label, e.g. 'opposing LHP weakness vs RHB'>", "evidence": "<one short phrase citing stats>", "leverage": "high" | "medium" | "low"}
+  ],
+  "matchup_risks": [
+    {"area": "<short label>", "mitigation": "<one sentence on how to neutralize it>"}
+  ]
+}
+
+The lineup MUST be exactly 9 players covering 9 distinct positions:
+C, 1B, 2B, 3B, SS, LF, CF, RF, DH. Pick the best hitters available who can
+plausibly play each position; if the team's hitter list is thin at a position,
+note this in the rationale rather than inventing a player. Return EXACTLY 3
+matchup_advantages and EXACTLY 2 matchup_risks. Ground every recommendation
+in the data provided; do not reference 2025+ events or trades."""
+
+
+def build_roster_llm(team_abbr: str, opponent_abbr: str,
+                    team_hitters: list[dict],
+                    opponent_pitchers: list[dict],
+                    opponent_defense_deltas: dict | None) -> dict:
+    """One gpt-4o call producing the roster-builder report as structured JSON."""
+    oai = _client()
+    user_payload = {
+        "team":     team_abbr,
+        "opponent": opponent_abbr,
+        "year":     2024,
+        "team_top_hitters":         team_hitters,
+        "opponent_top_pitchers":    opponent_pitchers,
+        "opponent_defense_deltas":  opponent_defense_deltas,
+    }
+    resp = oai.chat.completions.create(
+        model=GPT4O,
+        response_format={"type": "json_object"},
+        temperature=0,
+        seed=42,
+        messages=[
+            {"role": "system", "content": ROSTER_BUILDER_SYSTEM},
+            {"role": "user",   "content": json.dumps(user_payload, default=str)},
+        ],
+    )
+    return json.loads(resp.choices[0].message.content)
+
+
+def run_roster_builder_simple(team_abbr: str = "SEA",
+                              opponent_abbr: str = "HOU",
+                              max_budget: float | None = None,
+                              evaluation_year: int = 2024,
+                              progress: ProgressCallback = None) -> dict:
+    """Sprint orchestrator for the Roster Builder tab.
+
+    Aggregates the team's top hitters (PA >= 200) and the opponent's top
+    pitchers (IP >= 30), plus the opponent's per-position defensive deltas
+    if Statcast data is available. One ``gpt-4o`` call returns a structured
+    recommendation: lineup, advantages, risks, narrative.
+    """
+    def _tick(label: str) -> None:
+        if progress is not None:
+            progress(label)
+
+    if team_abbr not in TEAM_ABBR_TO_BREF:
+        raise ValueError(f"Unknown team abbreviation: {team_abbr}")
+    if opponent_abbr not in TEAM_ABBR_TO_BREF:
+        raise ValueError(f"Unknown opponent abbreviation: {opponent_abbr}")
+    bref_team     = TEAM_ABBR_TO_BREF[team_abbr]
+    bref_opponent = TEAM_ABBR_TO_BREF[opponent_abbr]
+    t0 = time.time()
+
+    _tick(f"Loading {evaluation_year} batting and pitching CSVs")
+    batting  = pd.read_csv(DATA_RAW / f"batting_{evaluation_year}.csv",  encoding="utf-8")
+    pitching = pd.read_csv(DATA_RAW / f"pitching_{evaluation_year}.csv", encoding="utf-8")
+
+    def _try_read(name: str) -> pd.DataFrame | None:
+        p = DATA_RAW / name
+        return pd.read_csv(p, encoding="utf-8") if p.exists() else None
+
+    oaa_df     = _try_read(f"oaa_{evaluation_year}.csv")
+    sprint_df  = _try_read(f"sprint_speed_{evaluation_year}.csv")
+    catcher_df = _try_read(f"catcher_defense_{evaluation_year}.csv")
+
+    _tick(f"Aggregating {team_abbr}'s top hitters and {opponent_abbr}'s top pitchers")
+    team_bat_df = _filter_team(batting,  bref_team)
+    opp_pit_df  = _filter_team(pitching, bref_opponent)
+    team_hitters     = _top_hitters(team_bat_df,  n=12)
+    opponent_pitchers = _top_pitchers(opp_pit_df, n=5)
+
+    opponent_defense_deltas: dict | None = None
+    if oaa_df is not None and sprint_df is not None:
+        _tick(f"Aggregating {opponent_abbr}'s defensive profile (per-position OAA, sprint, catcher pop time)")
+        opp_def    = aggregate_team_defense(opponent_abbr, oaa_df, catcher_df, sprint_df)
+        league_def = aggregate_league_defense_per_team(oaa_df, catcher_df, sprint_df)
+        opponent_defense_deltas = compute_defense_deltas(opp_def, league_def)
+
+    _tick(f"Asking GPT-4o to build a lineup and matchup plan for {team_abbr} vs {opponent_abbr}")
+    report = build_roster_llm(team_abbr, opponent_abbr, team_hitters,
+                              opponent_pitchers, opponent_defense_deltas)
+
+    return {
+        "team":     team_abbr,
+        "opponent": opponent_abbr,
+        "year":     evaluation_year,
+        "max_budget": max_budget,
+        "elapsed_seconds":  round(time.time() - t0, 2),
+        "team_hitters":       team_hitters,
+        "opponent_pitchers":  opponent_pitchers,
+        "opponent_defense_deltas": opponent_defense_deltas,
+        "narrative":          report.get("narrative", ""),
+        "recommended_lineup": report.get("recommended_lineup", []),
+        "matchup_advantages": report.get("matchup_advantages", []),
+        "matchup_risks":      report.get("matchup_risks", []),
+    }
+
+
 def run_opponent_scouting_simple(opponent_abbr: str = "HOU",
                                  evaluation_year: int = 2024,
                                  progress: ProgressCallback = None) -> dict:

@@ -32,7 +32,7 @@ Sabercast is a three-tab Streamlit application that uses LLM reasoning grounded 
 | Pipeline 04 ChromaDB vectorstore — 15 MLB analytics glossary entries (WAR, wRC+, wOBA, FIP, xFIP, BABIP, ISO, OPS, OAA, exit velocity, barrel rate, hard-hit rate, sprint speed, pop time, framing runs) + 999 player profiles (archetype + 2024 stats + trend), embedded with text-embedding-3-small | Complete — 1,014 embeddings persisted to `data/vectorstore/`. Retrieval smoke test verified: glossary queries return correct top-1 matches; player archetype queries return semantically appropriate clusters. |
 | ChromaDB vectorstore for embedding-based player matching | In work |
 | Fine-tuned contract valuation model (prompt-based fallback already in place) | In work |
-| Roster Builder tab end-to-end | In work |
+| Roster Builder tab functional — team + opponent dropdowns, 9-slot lineup recommendation with per-slot rationale, three matchup advantages with HIGH/MEDIUM/LOW leverage chips, two matchup risks with mitigations, strategic summary narrative; one gpt-4o call grounded in both teams' aggregates and the opponent's per-position OAA deltas | Complete |
 | Pre-cache layer for showcase demo scenarios | In work |
 | Streamlit Community Cloud deployment with public URL at https://sabercast-mlb.streamlit.app (GitHub repo: github.com/rwpeugh/sabercast; continuous deploy from main; OPENAI_API_KEY set via Cloud secrets pane) | Complete |
 | 5-year correlation study — composite gap_score (2019–2023 evaluation seasons) vs. next-year wins via pybaseball.standings, n=150 (team, year) observations, file-based diagnose-cache so reruns are free, scatter + per-year bar plots | Complete — see Quantitative evaluation section below for the findings |

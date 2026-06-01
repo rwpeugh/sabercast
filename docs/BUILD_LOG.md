@@ -328,5 +328,60 @@ The SEA RF gap, previously surfacing Mookie Betts / Seiya Suzuki / Giancarlo Sta
 
 ---
 
+## Entry 11 — May 31 (Final build): Roster Builder tab functional — three-tab parity
+
+**Goal:** Replace the "in work" placeholder on the Roster Builder tab with a working implementation. Achieve three-tabs-functional parity so the Demo Day pitch becomes *"pick any team for any of three decision tasks — build a lineup, scout an opponent, fill gaps."*
+
+**What was built**
+
+- **`run_roster_builder_simple`** in `core/orchestrator.py` — the third orchestrator, paralleling `run_gap_filler_simple` and `run_opponent_scouting_simple`. Takes `(team_abbr, opponent_abbr, max_budget, evaluation_year)`. Aggregates:
+  - Team's top 12 hitters (PA ≥ 200, by 2024 OPS)
+  - Opponent's top 5 pitchers (IP ≥ 30, by 2024 ERA — mix of starters and relievers)
+  - Opponent's per-position defensive deltas (Statcast OAA + catcher pop time + sprint speed), if available
+  
+  Makes one `gpt-4o` call (`temperature=0`, `seed=42`) using the new `ROSTER_BUILDER_SYSTEM` prompt that returns structured JSON: a 9-slot lineup, three matchup advantages, two matchup risks, and a 2–3 sentence strategic summary.
+- **`build_roster_llm`** helper for the LLM call, mirroring the pattern used elsewhere.
+- **`app/tabs/roster_builder.py`** — full rewrite of the placeholder:
+  - Team + opponent + payroll inputs (the opponent selector automatically excludes the chosen team)
+  - Session-scoped cache so repeat queries for the same (team, opponent) tuple return instantly
+  - Multi-step status widget driven by the same progress callback pattern
+  - Strategy narrative section
+  - Recommended starting-lineup table (Order / Position / Player / Rationale)
+  - Two-column matchup-analysis layout: *Advantages to lean into* (with HIGH/MEDIUM/LOW leverage chips) and *Risks to mitigate*
+  - "Reference data fed to the LLM" expander surfacing the raw top-hitter, top-pitcher, and opponent-defense tables so users can audit the LLM's reasoning against ground truth
+- **`demo/capture_roster_builder.py`** — captures two new screenshots: tab top (inputs + narrative + lineup top) and matchup analysis section (full lineup + advantages + risks).
+
+**What it produced — SEA vs HOU demo run**
+
+- 5.07 seconds, one gpt-4o call
+- **Narrative:** *"Seattle should focus on exploiting Houston's defensive weaknesses at first and second base while being cautious of their strong center field and third base defense. Prioritizing contact hitters and speed will be key against Houston's strong pitching staff."*
+- **Lineup** (9 actual Mariners 2024 players):
+  1. CF Julio Rodríguez — *Leadoff with speed and decent OBP*
+  2. RF Víctor Robles — *High OPS and contact ability*
+  3. LF Luke Raley — *Power threat in the heart of the order*
+  4. C  Cal Raleigh — *Power bat in cleanup spot*
+  5. 3B Justin Turner — *Veteran presence and OBP skills*
+  6. DH Randy Arozarena — *Power and speed combination*
+  7. 1B Ty France — *Exploit weak 1B defense*
+  8. 2B Jorge Polanco — *Exploit weak 2B defense*
+  9. SS J.P. Crawford — *Solid defense and OBP at the bottom*
+- **Advantages:** opposing 1B defensive weakness (HIGH, citing HOU 1B OAA delta −5.53), opposing 2B defensive weakness (HIGH, citing −11.13 OAA delta), opposing LHP weakness vs RHB (MEDIUM, citing Framber Valdez ERA/WHIP)
+- **Risks:** strong CF defense (*"Avoid hitting fly balls to center field; focus on line drives and ground balls"*), strong 3B defense (*"Encourage hitters to pull the ball away from third base"*)
+
+**State of the app after this entry**
+
+Three tabs, all functional, all powered by structured-output LLM calls grounded in 2024 stats + defensive metrics:
+
+| Tab | Purpose | LLM cost per run | Wall time |
+|---|---|---|---|
+| Roster Builder    | Build a lineup vs a specific opponent      | 1 gpt-4o call         | ~5 s  |
+| Opponent Scouting | Identify exploitable weaknesses + strategy | 1 gpt-4o call         | ~5 s  |
+| Gap Filler        | Diagnose gaps + recommend targets + price  | 1 gpt-4o + ~11 gpt-4o-mini | ~40 s |
+
+Demo Day narrative: *"Pick any of 30 teams. Pick an opponent. Pick a payroll. Sabercast supports three decision tasks in one app, each one running real-time grounded LLM reasoning over the same underlying Statcast + bref + Spotrac data pipeline."*
+
+---
+
+
 
 
