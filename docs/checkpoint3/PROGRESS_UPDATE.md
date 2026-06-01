@@ -34,7 +34,7 @@ Sabercast is a three-tab Streamlit application that uses LLM reasoning grounded 
 | Fine-tuned contract valuation model (prompt-based fallback already in place) | In work |
 | Roster Builder tab end-to-end | In work |
 | Pre-cache layer for showcase demo scenarios | In work |
-| Streamlit Community Cloud deployment with public URL | In work |
+| Streamlit Community Cloud deployment with public URL at https://sabercast-mlb.streamlit.app (GitHub repo: github.com/rwpeugh/sabercast; continuous deploy from main; OPENAI_API_KEY set via Cloud secrets pane) | Complete |
 | 5-year correlation study — composite gap_score (2019–2023 evaluation seasons) vs. next-year wins via pybaseball.standings, n=150 (team, year) observations, file-based diagnose-cache so reruns are free, scatter + per-year bar plots | Complete — see Quantitative evaluation section below for the findings |
 
 ---
@@ -105,4 +105,6 @@ Four of five years are now negative in the defense-augmented run.
 
 ## Public URL
 
-Streamlit Community Cloud deployment is in work. The app currently runs locally via `streamlit run app/streamlit_app.py` after a one-line OpenAI key setup.
+**<https://sabercast-mlb.streamlit.app>**
+
+The app is deployed publicly on Streamlit Community Cloud, connected to the GitHub repository at <https://github.com/rwpeugh/sabercast>. Every push to the `main` branch redeploys automatically in approximately 30 seconds. End-to-end Gap Filler runs on the deployed instance complete in roughly 40 seconds for the full 12-LLM-call orchestration.

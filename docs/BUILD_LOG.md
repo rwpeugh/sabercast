@@ -301,4 +301,32 @@ The SEA RF gap, previously surfacing Mookie Betts / Seiya Suzuki / Giancarlo Sta
 
 ---
 
+## Entry 10 — May 31 (Final build): Public deployment on Streamlit Community Cloud
+
+**Goal:** Get a public URL so classmates, the professor, and Demo Day judges can interact with the app without setup. Surface deployment-only issues before Demo Day.
+
+**What was built**
+
+- **GitHub repository.** `sabercast/` initialized as a git repo, pushed to <https://github.com/rwpeugh/sabercast> (public). Initial commit covers everything: app code, 115 contracts, multi-year stats, 6 years of Statcast defensive data, ChromaDB vectorstore, archetypes CSV, eval results, all docs.
+- **`runtime.txt`** specifying `python-3.11` for compatibility with Streamlit Cloud's supported runtimes (Cloud picked Python 3.14 on its own — fine, our code runs on both).
+- **`.streamlit/config.toml`** — theming, headless mode, telemetry off, and `[client] showErrorDetails = "full"` for diagnosing deployment-only failures.
+- **`.gitignore`** updated to allow `data/` into the repo (under 25 MB total) so the deployed app doesn't need to rebuild Pipelines 01–04 on every cold start, while continuing to exclude secrets and OS noise.
+- **`DEPLOY.md`** with the step-by-step instructions for the Streamlit Cloud side of the workflow.
+- **Streamlit Cloud app** created at <https://sabercast-mlb.streamlit.app>, connected to the `main` branch, `OPENAI_API_KEY` set via the Cloud secrets pane.
+
+**Two deployment-only bugs caught and fixed**
+
+1. **Secret retrieval.** Our `get_openai_api_key()` only checked `os.environ` and local files. Streamlit Cloud puts secrets into `st.secrets[...]` but does not always propagate them to environment variables. The app booted, the landing page rendered, then the Gap Filler diagnose call raised `RuntimeError: OpenAI API key not found` from inside `_client()`. Fix: added `st.secrets["OPENAI_API_KEY"]` as the second search location, between the env var and the local file lookups. Module remains importable from non-Streamlit contexts (pipelines, eval scripts) because the streamlit import is guarded by try/except.
+2. **Redacted client errors.** Streamlit Cloud redacts client-side error tracebacks for safety. The full traceback is available in *Manage app → Logs*. Documented in DEPLOY.md so anyone debugging future deploys knows where to look.
+
+**What it produced**
+
+- A live, public Streamlit app at <https://sabercast-mlb.streamlit.app/>
+- End-to-end Gap Filler run on the deployed instance: **41.5 seconds, 1 gpt-4o + 11 gpt-4o-mini calls**. Roster summary, Plotly delta chart, gap cards, recommended targets (from the ChromaDB vectorstore), pricing comparables, and the highest-priority banner all render exactly as on local.
+- Two deployment-proof screenshots saved at `docs/checkpoint3/deployed_01_landing.png` and `docs/checkpoint3/deployed_02_gap_filler_after_diagnose.png`.
+- Continuous deployment from the GitHub `main` branch — every push redeploys in ~30 seconds.
+
+---
+
+
 
