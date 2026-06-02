@@ -96,10 +96,12 @@ def main() -> None:
             time.sleep(2)
             print("[ 0:18] Waiting for Roster Builder to finish (one gpt-4o-mini call) ...")
             try:
-                frame.locator("text=/Recommended lineup/i").first.wait_for(timeout=180_000)
+                # The output heading is "Recommended starting lineup" — use a more
+                # permissive selector that matches the actual rendered text.
+                frame.locator("text=Recommended starting lineup").first.wait_for(timeout=180_000)
                 time.sleep(2)
             except Exception:
-                print("  WARN: 'Recommended lineup' not found; continuing with whatever rendered")
+                print("  WARN: 'Recommended starting lineup' not found; continuing with whatever rendered")
         except Exception as e:
             print(f"  WARN: Roster Builder button not clickable: {type(e).__name__}: {e}")
 
@@ -123,7 +125,9 @@ def main() -> None:
             time.sleep(2)
             print("[ 1:00] Waiting for Scouting output (one gpt-4o call) ...")
             try:
-                frame.locator("text=/Top threats|threats/i").first.wait_for(timeout=180_000)
+                # Scouting output renders an "Exploitable weaknesses" or "Top threats"
+                # heading; either is fine.
+                frame.locator("text=Top threats").first.wait_for(timeout=180_000)
                 time.sleep(2)
             except Exception:
                 print("  WARN: 'Top threats' not found; continuing")
