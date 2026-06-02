@@ -33,6 +33,8 @@ Sabercast targets the second tier: front offices with $130–220M payrolls that 
 
 Each is answered by composing public-data ingestion + LLM-driven structured reasoning + retrieval-augmented player matching, all in under fifteen seconds of wall time. The deployed Streamlit app is the actual deliverable — not a research notebook.
 
+![Figure 1. Gap Filler tab on the deployed Streamlit Cloud app, showing top-ranked roster gaps with position-matched candidates and contract-cost forecasts for the Seattle Mariners. Live at sabercast-mlb.streamlit.app.](checkpoint3/02_gap_filler_results_top.png)
+
 ---
 
 ## 3. System architecture
@@ -152,6 +154,8 @@ The team-aggregate gap_score isn't predictive of wins, but Sabercast's **individ
 
 Two positions reach statistical significance. This is the strongest evidence of diagnostic validity: when Sabercast surfaces a 2B or LF gap, the team's actual production at that position the following year is significantly more likely to be below league average than chance.
 
+![Figure 2. Position-level diagnostic precision. Each bar is the percentage of (year, team) cases where Sabercast's top-1 flagged position underperformed league average the following year. Green bars are statistically significant at p < 0.05; amber is trending p < 0.10; gray is not significant. The dashed line is the 50% random baseline.](../../eval/results/gap_position_hit_rate.png)
+
 ### 5.5 RAG accuracy delta — the strongest single result
 
 20 held-out questions across 5 categories. Each question runs through gpt-4o twice — once with no context, once with ChromaDB-retrieved player-profile and glossary context. Ground truth derived programmatically from the vectorstore (no hand-curation bias). Outcome scored as 0/1 with explicit per-question rules (list overlap, substring match, numeric tolerance).
@@ -169,6 +173,8 @@ Two positions reach statistical significance. This is the strongest evidence of 
 **McNemar's exact paired test: p = 0.0005.** Statistically significant.
 
 The −50 pp on general-knowledge questions is a real honest finding: when we instructed gpt-4o to use only retrieved context, it correctly refused to answer "who won the 2024 World Series?" because no player profile in our vectorstore mentions the answer. The no-RAG model knew this from training data. This is a **prompt-design tradeoff** worth surfacing — a production RAG system would relax the constraint for general-knowledge fallback.
+
+![Figure 3. RAG accuracy by category. Blue bars are RAG-augmented gpt-4o accuracy; gray bars are no-retrieval gpt-4o on the same 20 held-out questions. RAG wins decisively on archetype, trend, combined-filter, and specific-stat questions (the categories where the vectorstore has direct knowledge). The general-knowledge loss is an honest prompt-design tradeoff — we instructed the model to use only retrieved context, so it refused to answer questions outside the vectorstore's scope.](../../eval/results/rag_accuracy_by_category.png)
 
 ### 5.6 Contract valuation — head-to-head fine-tune vs baseline
 
