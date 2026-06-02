@@ -1,0 +1,8 @@
+category,n,no_rag_acc,rag_acc,delta_pp
+archetype,5,0.0,1.0,1.0
+trend,3,0.0,1.0,1.0
+combined_filter,4,0.0,0.75,0.75
+specific_stat,4,0.0,1.0,1.0
+general,2,0.5,0.0,-0.5
+glossary,2,1.0,1.0,0.0
+OVERALL,20,0.15,0.85,0.7

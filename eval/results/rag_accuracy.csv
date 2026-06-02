@@ -1,0 +1,21 @@
+id,category,question,scoring,answer_norag,answer_rag,correct_norag,correct_rag,delta
+Q1,archetype,Name 3 players Sabercast classifies as 'ace_starter' archetype in 2024.,list_overlap,unknown,"Kyle Bradish, Justin Steele, Tarik Skubal",0,1,1
+Q2,archetype,Name 3 players Sabercast classifies as 'defensive_specialist' archetype in 2024.,list_overlap,unknown,"Patrick Bailey, Garrett Stubbs, Austin Barnes",0,1,1
+Q3,archetype,Name 4 players Sabercast classifies as 'speed_threat' archetype in 2024.,list_overlap,unknown,"Max Schuemann, Jarren Duran, Tyler Wade, Harrison Bader",0,1,1
+Q4,archetype,Name 3 'closer' archetype pitchers in our 2024 dataset.,list_overlap,unknown,"Daniel Hudson, Blake Treinen, Aroldis Chapman",0,1,1
+Q5,archetype,Name 3 'contact_hitter' archetype batters in 2024.,list_overlap,unknown,"Matt Thaiss, Angel Martínez, Javier Báez",0,1,1
+Q6,trend,Name 3 batters Sabercast marks with 'improving' trend in 2024.,list_overlap,unknown,"Brett Baty, Danny Mendick, Harrison Bader",0,1,1
+Q7,trend,Name 3 pitchers Sabercast marks with 'declining' trend in 2024.,list_overlap,unknown,"Max Scherzer, Nick Sandlin",0,1,1
+Q8,trend,Name 2 batters with 'stable' trend classification in 2024.,list_overlap,unknown,"Victor Scott II, José Caballero",0,1,1
+Q9,combined_filter,Name 2 'ace_starter' archetype pitchers with improving trend in 2024.,list_overlap,unknown,There are no 'ace_starter' archetype pitchers with an improving trend in 2024.,0,0,0
+Q10,combined_filter,List 3 'power_hitter' archetype batters with declining trend in 2024.,list_overlap,unknown,"Jake Bauers, Anthony Rizzo, Will Smith",0,1,1
+Q11,combined_filter,Name a 'closer' archetype reliever with stable trend in 2024.,list_overlap,unknown,"Carlos Estévez, Daniel Hudson, Manuel Rodríguez",0,1,1
+Q12,combined_filter,List 3 batters with 'speed_threat' archetype across MLB in 2024.,list_overlap,unknown,"Harrison Bader, Max Schuemann, Luis García Jr.",0,1,1
+Q13,specific_stat,What was Aaron Judge's 2024 OPS according to Sabercast's data?,numeric,unknown,1.126,0,1,1
+Q14,specific_stat,How many home runs did Shohei Ohtani hit in 2024 according to Sabercast's data?,numeric,unknown,57,0,1,1
+Q15,specific_stat,Who led MLB in home runs during the 2024 regular season?,substring,unknown,Aaron Judge,0,1,1
+Q16,specific_stat,Which player had the highest OPS in MLB during the 2024 season?,substring,unknown,Aaron Judge,0,1,1
+Q17,general,Which MLB team won the 2024 World Series?,substring,unknown,The retrieved context does not provide information about the winner of the 2024 World Series.,0,0,0
+Q18,general,What primary position does Aaron Judge play?,substring,right field,The retrieved context does not specify Aaron Judge's primary position.,1,0,-1
+Q19,glossary,"What does the baseball stat 'WAR' stand for, and what does a value of 0 mean?",substring,"WAR stands for Wins Above Replacement. A value of 0 means the player is performing at the level of a replacement player, which is a baseline level of performance that a team could expect from a readily available minor league or bench player.","WAR stands for Wins Above Replacement. A value of 0 means the player is performing at the level of a freely available replacement-level player at the same position, contributing no additional wins to their team.",1,1,0
+Q20,glossary,What is wRC+? What does a value of 100 mean for a hitter?,substring,"wRC+ stands for Weighted Runs Created Plus, a statistic that measures a hitter's total offensive value and compares it to league average. A value of 100 means the hitter is exactly league average.","wRC+ is Weighted Runs Created Plus, a park- and league-adjusted offensive rate stat scaled so that league-average production equals 100. A wRC+ value of 100 means the hitter created runs at a league-average rate.",1,1,0
