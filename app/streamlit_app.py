@@ -1,8 +1,17 @@
 """Sabercast — Streamlit entry point.
 
-Three-tab MLB front-office intelligence app. Sprint scope: Tab 3 (Gap Filler) is
-fully functional for the Seattle Mariners; Tabs 1 and 2 render "Coming soon"
-placeholders. Resume the full phased build after Checkpoint 3.
+Three-tab MLB front-office intelligence app. All three tabs are functional
+across any of the 30 MLB clubs:
+    1. Roster Builder    — day-to-day lineup construction vs. a chosen opponent
+                            (one gpt-4o call returning structured lineup + matchup notes)
+    2. Opponent Scouting — narrative + top threats + exploitable weaknesses
+                            (one gpt-4o call)
+    3. Gap Filler        — top-3 roster gaps + candidate targets + contract forecasts
+                            (1 gpt-4o + ~11 gpt-4o-mini calls running in parallel)
+
+See docs/final_report/SABERCAST_FINAL_REPORT.md for the full evaluation
+(9 tests, 2 statistically significant findings) and BUILD_LOG.md for the
+chronological build history (16 entries).
 """
 from __future__ import annotations
 
