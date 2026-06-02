@@ -47,7 +47,16 @@ for g in out["gaps_results"]:
         premium = ""
         if t.get("is_expensive_vs_estimate"):
             premium = f"  [PREMIUM +{int((t['premium_vs_estimate'] or 0)*100)}% vs estimate]"
-        print(f"    {t['player_name']:28s} fit={t['fit_score']:5.2f}  "
+        # Targets carry either fit_score (stat-fit path) or semantic_score
+        # (vectorstore path). Print whichever is available.
+        score_lbl = ""
+        if t.get("fit_score") is not None:
+            score_lbl = f"fit={t['fit_score']:5.2f}"
+        elif t.get("semantic_score") is not None:
+            score_lbl = f"sem={t['semantic_score']:5.2f}"
+        else:
+            score_lbl = "score=   ? "
+        print(f"    {t['player_name']:28s} {score_lbl}  "
               f"current=${cur_aav:.1f}M  forecast=${fc_aav:.1f}M{premium}")
         print(f"      stats: {stat_str}")
         if t.get("forecast_rationale"):
