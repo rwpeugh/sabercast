@@ -214,7 +214,7 @@ def render() -> None:
     result = st.session_state.get("gap_filler_result")
     if not result:
         st.info("Click *Diagnose roster gaps* to run the analysis. "
-                "Expect 10–15 seconds for the live LLM calls.")
+                "Typical end-to-end: 8–15 seconds (LLM calls run in parallel).")
         return
 
     # ── Roster summary + delta chart side by side ────────────────────────────
@@ -224,8 +224,10 @@ def render() -> None:
         st.write(result["roster_summary"])
         eval_yr = result.get("evaluation_year", 2024)
         mkt_yr  = result.get("market_year", eval_yr + 1)
+        n_target_calls = sum(len(g.get("targets") or []) for g in result["gaps_results"])
         st.caption(
-            f"Run took {result.get('elapsed_seconds')}s · 1 gpt-4o + 3 gpt-4o-mini calls\n\n"
+            f"Run took {result.get('elapsed_seconds')}s · "
+            f"1 gpt-4o + {3 + n_target_calls} gpt-4o-mini calls (parallelized)\n\n"
             f"Comparables from contracts signed on or before {eval_yr}; "
             f"pricing anchored to the {mkt_yr} offseason."
         )
