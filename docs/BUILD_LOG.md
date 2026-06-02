@@ -584,6 +584,127 @@ openai.PermissionDeniedError: Error code: 403 — {
 
 ---
 
+## Entry 16 — June 1 (Final build, post-Checkpoint 3): Statistical rigor pass + final report bundle
+
+**Goal.** Address the professor's Checkpoint 3 feedback head-on. Three asks: (1) clear evaluation success metrics with concrete evidence, (2) the gap-score vs. next-year-wins eval (even a partial result), (3) an architecture diagram showing which model does what. This entry covers all three plus the four additional pre-registered tests we ran to triangulate the answer to "is this tool useful?"
+
+### What was added (chronological)
+
+**Data refresh (Phase 6 step 0).** Pulled 2025 stats and 2018/2019-2025 team standings.
+- `pipelines/01b_pull_standings.py` (new) — pulls per-year MLB standings via pybaseball + 2025 OAK→Athletics rebrand alias handling
+- `pipelines/01c_pull_bwar.py` (new) — pulls Baseball Reference bWAR archives (13,379 batting rows + 8,267 pitching rows since 2018), needed for the wins-predictor feature engineering
+- 2025 batting/pitching/OAA/sprint/catcher_pop added to `data/raw/`
+- correlation study extended from 5 evaluation years (2019–2023) to 6 (2019–2024), now 180 team-year rows vs the prior 150
+- Spotrac re-scrape ran but produced identical 115 contracts; contracts.csv stays byte-stable so the Entry 15 fine-tune MAE numbers remain valid
+
+**Architecture diagram (Phase 6.1).** Created `docs/architecture_diagram.md` (Mermaid source) and `docs/architecture_diagram.png` (rendered via mermaid.ink). Every box labeled with the specific model or store doing the work — gpt-4o (narrative reasoning), gpt-4o-mini (structured JSON output), text-embedding-3-small (RAG retrieval + Batch API archetype classification), fine-tuned Qwen 2.5 7B (eval-only via Together dedicated endpoint). Includes the RAG flow, determinism guarantees, no-look-ahead enforcement rules, and a callout for why the fine-tune is eval-only (4-min dedicated-endpoint cold-start incompatible with interactive Streamlit UX).
+
+**Statistical validation suite (Phase 6.3, pre-registered).** Built `eval/statistical_validation.py` running six pre-registered analyses on the existing CSVs (no new LLM calls):
+
+| # | Test | Result |
+|---|---|---|
+| 6.3.1 | Correlation significance + bootstrap CIs | All four correlations underpowered. r = −0.058 (n=180) has CI [−0.21, +0.09] — crosses zero. Min detectable \|r\| = 0.21 at α=0.05/power=0.80. |
+| 6.3.2 | Baseline shootout | Last-year wins **r = +0.573** (p < 0.0001) vs Sabercast gap_score r = −0.074 (p = 0.42). Excl. COVID, n=120. **gap_score loses to autocorrelation by ~8× in magnitude.** |
+| 6.3.3 | Top-1 gap-position hit-rate | Overall 62.8% (n=172). **2B 71.9% (p = 0.020), LF 75.0% (p = 0.041) — both significant.** SP trending at 81.8% (n=11, p = 0.065). |
+| 6.3.4 | Market-tier stratification | All three tiers (small / mid / large) show essentially the same null. Business framing is not differentially validated by data. |
+| 6.3.5 | Year-stratified | No monotonic trend. Signal does not compound as the contract pool grows. |
+| 6.3.6 | Contract MAE significance | Ex-Ohtani Δ = +$0.58M, bootstrap CI [−$0.35M, +$1.52M] — **crosses zero**. Wilcoxon p = 0.48. **The Entry 15 16% improvement claim is directional but not statistically significant at n=25.** IF position (n=9) barely reaches significance with CI [+$0.04M, +$2.89M]. |
+
+**Wins predictor + bWAR (follow-up to 6.3.2).** Built `eval/wins_predictor.py` — multivariate OLS regression with leave-one-year-out CV. Baseline features: last-year wins, Pythagorean expectation, team bWAR (sum), PA-weighted roster age. Tested whether gap_score adds incremental signal on top of those box-score features.
+
+Excl. COVID (n=120):
+- Baseline R² = 0.384  (LOYO-CV R² = 0.343)
+- Extended (+ gap_score) R² = 0.385  (LOYO-CV R² = 0.339)
+- **Incremental R² = +0.0008**, partial F-test **p = 0.70**
+- gap_score coefficient = −0.123 (correct sign), p = 0.70
+- Most significant single predictor: roster age (β = −2.61, p = 0.006)
+
+**Verdict: gap_score adds zero incremental information beyond what box-score features already capture.** The LLM diagnostic is **re-describing** information already encoded in box scores rather than extracting novel quantitative signal at the wins-prediction layer.
+
+**Contract expansion + gap-fill test.** `pipelines/02c_scrape_spotrac_fa_tracker.py` scraped Spotrac's yearly FA tracker for 2019-2026 offseasons → 1,202 net-new mid-tier signings (median AAV $3.75M). Saved to `contracts_extended.csv` (separate file — contracts.csv stays byte-stable to preserve Entry 15 published numbers). Combined pool: 1,254 contracts.
+
+`eval/gap_fill_test.py` then tests: did teams that filled their flagged top-1 gap win more next year?
+- Filled top-1 (n=39): mean Δwins = +1.90
+- Did not fill (n=81): mean Δwins = −0.90
+- **Difference: +2.80 wins favoring filled (Mann-Whitney p = 0.39 — not significant)**
+
+**Methodology ablation (Levers 1 and 2) — testing whether measurement noise is the limitation.**
+
+*Lever 1 — drop positional scarcity weights:*
+- Weighted (C/SS=1.4, DH=0.7, …): r = −0.092
+- Unweighted (all 1.0):                r = −0.122  (p = 0.10, marginally closer to significance)
+- Δ|r| = +0.029. Heuristic scarcity multipliers **add slightly more noise than signal** but the difference doesn't cross p < 0.05.
+
+*Lever 2 — continuous treatment (AAV invested at flagged position):*
+- Pearson (linear AAV, Δwins) = +0.004  (p = 0.97)
+- Pearson (log AAV, Δwins)    = +0.103  (p = 0.26)
+- Spearman (rank)             = +0.061  (p = 0.51)
+
+**All three null.** The +2.80 wins difference from the binary gap-fill test is therefore most likely **selection bias** rather than a real dose-response. Teams that sign expensive FAs are richer / more competitive anyway; the gap-fill correlation is downstream of payroll, not of Sabercast's recommendation quality.
+
+**RAG accuracy eval — the strongest single finding.** Built `eval/rag_eval.py` (the unfilled Phase 5 spec item). 20 held-out questions across 5 categories. Each question runs through gpt-4o twice — once with no context, once with ChromaDB-retrieved player profile + glossary context. Ground truth derived programmatically from the vectorstore metadata (no hand-curation bias).
+
+| Category | n | no-RAG | RAG | Δ |
+|---|---|---|---|---|
+| Archetype lookup | 5 | 0% | **100%** | **+100 pp** |
+| Trend labels | 3 | 0% | **100%** | **+100 pp** |
+| Combined filter | 4 | 0% | 75% | +75 pp |
+| Specific 2024 stats | 4 | 0% | **100%** | **+100 pp** |
+| General knowledge | 2 | 50% | 0% | −50 pp |
+| Glossary | 2 | 100% | 100% | tied |
+| **OVERALL** | **20** | **15%** | **85%** | **+70 pp** |
+
+**McNemar's exact paired test: p = 0.0005.** Statistically significant.
+
+The −50 pp on General-knowledge questions is an honest sub-finding: when we instructed gpt-4o to use only retrieved context, it correctly refused to answer "who won the 2024 World Series?" because no player profile in the vectorstore mentions the answer. A production RAG system would relax the constraint for general-knowledge fallback. We surface this as a prompt-design tradeoff rather than dressing it up.
+
+**Final report bundle (Phase 6.2 + 6.4).** Created `docs/final_report/`:
+- `EVALUATION.md` — consolidated analytical document with all nine tests + the descriptive results
+- `SABERCAST_FINAL_REPORT.md` — the final deliverable (executive summary → business framing → architecture → technical depth → evaluation → vendor risk → known limitations → rubric mapping)
+- `Sabercast_Final_Report.docx` — rendered Word doc with the architecture PNG embedded after § 3
+
+### Headline findings (the full nine-test triangulation)
+
+| # | Test | Result | Significant? |
+|---|---|---|---|
+| 1 | Pooled correlation gap_score → next-year wins | r = −0.058, n=180 | NO |
+| 2 | **Baseline shootout** | Sabercast \|r\|=0.07 vs autocorrelation \|r\|=0.57 | **NO — gap_score is a diagnostic** |
+| 3 | **Position-level hit-rate** | 71.9% at 2B (p=0.020), 75.0% at LF (p=0.041) | **YES (2 positions)** |
+| 4 | Contract MAE significance | Ex-Ohtani Δ +$0.58M, CI crosses zero | NO (n=25) |
+| 5 | Wins predictor incremental R² | ΔR² = +0.0008, p=0.70 | NO |
+| 6 | Gap-fill binary | +2.80 wins diff | NO (p=0.39) |
+| 7 | Lever 1 — drop weights | Δ\|r\| = +0.029 | NO |
+| 8 | Lever 2 — continuous treatment | Pearson(log AAV) = +0.103 | NO (p=0.26) |
+| 9 | **RAG accuracy delta** | **+70 pp gain, 15% → 85%** | **YES (McNemar p=0.0005)** |
+
+**Two cleanly significant findings, both supporting the same story:** Sabercast's value is in the diagnostic and retrieval layers, not in team-level wins forecasting.
+
+### What this means for the final report
+
+The diagnostic-tool framing is now triangulated from nine independent tests. The report (`docs/final_report/SABERCAST_FINAL_REPORT.md`) leads with:
+
+> "Sabercast's RAG pipeline produces a measurable +70 percentage-point accuracy gain on player-profile queries (p < 0.001). Its position-level gap diagnostic identifies positions that underperform next year significantly above chance for 2B and LF specifically. The tool does NOT predict team-level wins improvement, and we report that null finding honestly across five different tests."
+
+This is honest, defensible, and bounds the claims to what the data actually supports.
+
+### Costs across this final-build phase
+
+- OpenAI: ~$3 (180 gpt-4o gap-diagnostic re-runs to re-populate the cache, plus 40 calls for the RAG eval, plus correlation/methodology ablation runs)
+- Together AI: $0 additional (no new fine-tune; reused the Entry 15 model artifact)
+- Total post-Checkpoint-3 platform spend: ~$3
+- Cumulative project spend across the entire build: ~$45 OpenAI + $1.94 Together = **~$47 total**
+
+### Output artifacts (post-Checkpoint 3 additions)
+
+- `pipelines/01b_pull_standings.py`, `01c_pull_bwar.py`, `02c_scrape_spotrac_fa_tracker.py`
+- `eval/statistical_validation.py`, `wins_predictor.py`, `gap_fill_test.py`, `methodology_ablation.py`, `rag_eval.py`
+- 25+ new CSV result files in `eval/results/`
+- `docs/architecture_diagram.md` + `docs/architecture_diagram.png`
+- `docs/final_report/EVALUATION.md` + `SABERCAST_FINAL_REPORT.md` + `Sabercast_Final_Report.docx`
+- This entry (16) and the regenerated `Sabercast_Build_Log.docx` + `Sabercast_Progress_Update.docx`
+
+---
+
 
 
 
