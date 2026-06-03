@@ -175,6 +175,26 @@ except Exception as e:                                          # noqa: BLE001
     traceback.print_exc()
 
 
+# ── Test 7: shared-city disambiguation (CHC must NOT include CWS players) ──
+# Regression test for the bug where Andrew Vaughn (CWS, AL) appeared in CHC
+# (NL) team-hitters because both map to "Chicago" in bref's Tm column.
+# Fix: _filter_team now accepts a `league` parameter that filters the Lev
+# column ("Maj-AL" / "Maj-NL") for the three shared-city franchise pairs.
+print("\n=== Test 7: shared-city CHC vs CWS disambiguation ===")
+try:
+    chc = run_roster_builder_simple("CHC", opponent_abbr="MIL", evaluation_year=2024)
+    chc_names = [h["name"] for h in chc.get("team_hitters", [])]
+    if "Andrew Vaughn" in chc_names:
+        _fail("CHC team hitters incorrectly include Andrew Vaughn (CWS)",
+              f"team_hitters={chc_names}")
+    else:
+        _ok("CHC team hitters correctly exclude Vaughn (CWS)",
+            f"(n={len(chc_names)}; sample: {chc_names[:5]} ...)")
+except Exception as e:                                          # noqa: BLE001
+    _fail("CHC vs MIL roster builder crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
 # ── Summary ────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 print(f"EDGE-CASE SMOKE TEST: {PASS} passed · {WARN} warned · {FAIL} failed")

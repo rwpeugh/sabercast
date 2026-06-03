@@ -48,6 +48,7 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(PROJECT_ROOT))
 from core.orchestrator import (                                # noqa: E402
     TEAM_ABBR_TO_BREF,
+    TEAM_ABBR_TO_LEAGUE,
     POSITION_SCARCITY_WEIGHTS,
     _compute_delta, _filter_team,
     aggregate_batting, aggregate_pitching,
@@ -277,9 +278,10 @@ def main() -> None:
         print(f"  defensive data for {year}: {defense_tag}")
 
         for abbr in sorted(TEAM_ABBR_TO_BREF):
-            bref_team = TEAM_ABBR_TO_BREF[abbr]
-            team_bat_df = _filter_team(batting,  bref_team)
-            team_pit_df = _filter_team(pitching, bref_team)
+            bref_team   = TEAM_ABBR_TO_BREF[abbr]
+            team_league = TEAM_ABBR_TO_LEAGUE.get(abbr)
+            team_bat_df = _filter_team(batting,  bref_team, league=team_league)
+            team_pit_df = _filter_team(pitching, bref_team, league=team_league)
             team_bat = aggregate_batting(team_bat_df)
             team_pit = aggregate_pitching(team_pit_df)
             team_pit_overall = team_pit.get("overall", {})

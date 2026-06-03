@@ -106,11 +106,45 @@ GPT4O_MINI = "gpt-4o-mini"
 # ──────────────────────────────────────────────────────────────────────────────
 # Data loading and aggregation
 # ──────────────────────────────────────────────────────────────────────────────
-def _filter_team(df: pd.DataFrame, bref_team: str) -> pd.DataFrame:
-    """Rows where Tm column contains the team city (catches mid-season trades)."""
+def _filter_team(df: pd.DataFrame, bref_team: str,
+                  league: str | None = None) -> pd.DataFrame:
+    """Rows where Tm column contains the team city (catches mid-season trades).
+
+    Three MLB cities host two teams each — Chicago (CHC/CWS), Los Angeles
+    (LAD/LAA), New York (NYM/NYY). Filtering on city alone returns BOTH
+    teams' players (e.g., a CHC query would incorrectly include Andrew
+    Vaughn from CWS). When `league` is provided ("AL" or "NL"), we also
+    filter on the `Lev` column to disambiguate. For non-ambiguous cities
+    the league filter is a no-op but harmless.
+
+    Inter-league mid-season trades (Lev='Maj-AL,Maj-NL') are matched for
+    BOTH leagues since the player did genuinely appear in both. Their
+    stats are split across the original team rows; downstream aggregates
+    may slightly over-count these players when summing across both
+    leagues. There were 6 such players in 2024; we accept this as a small
+    edge-case caveat rather than complicating the schema further.
+    """
     if "Tm" not in df.columns:
         return df.iloc[0:0]
-    return df[df["Tm"].astype(str).str.contains(bref_team, case=False, na=False)].copy()
+    rows = df[df["Tm"].astype(str).str.contains(bref_team, case=False, na=False)]
+    if league and "Lev" in df.columns:
+        wanted = f"Maj-{league.upper()}"
+        rows = rows[rows["Lev"].astype(str).str.contains(wanted, case=False, na=False)]
+    return rows.copy()
+
+
+# Each MLB team's league. Used by _filter_team to disambiguate shared-city
+# franchise pairs (Chicago, Los Angeles, New York).
+TEAM_ABBR_TO_LEAGUE: dict[str, str] = {
+    "ARI": "NL", "ATL": "NL", "BAL": "AL", "BOS": "AL",
+    "CHC": "NL", "CWS": "AL", "CIN": "NL", "CLE": "AL",
+    "COL": "NL", "DET": "AL", "HOU": "AL", "KC":  "AL",
+    "LAA": "AL", "LAD": "NL", "MIA": "NL", "MIL": "NL",
+    "MIN": "AL", "NYM": "NL", "NYY": "AL", "OAK": "AL",
+    "PHI": "NL", "PIT": "NL", "SD":  "NL", "SEA": "AL",
+    "SF":  "NL", "STL": "NL", "TB":  "AL", "TEX": "AL",
+    "TOR": "AL", "WSH": "NL",
+}
 
 
 def _safe_weighted_mean(values: pd.Series, weights: pd.Series) -> float | None:
@@ -929,8 +963,9 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
 
     if team_abbr not in TEAM_ABBR_TO_BREF:
         raise ValueError(f"Unknown team abbreviation: {team_abbr}")
-    bref_team = TEAM_ABBR_TO_BREF[team_abbr]
-    market_year = evaluation_year + 1
+    bref_team    = TEAM_ABBR_TO_BREF[team_abbr]
+    team_league  = TEAM_ABBR_TO_LEAGUE.get(team_abbr)
+    market_year  = evaluation_year + 1
     t0 = time.time()
 
     # 1. Load
@@ -949,10 +984,11 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
     catcher_df = _try_read("catcher_defense_2024.csv")
     have_defense = oaa_df is not None and sprint_df is not None
 
-    # 2. Aggregate team and league
+    # 2. Aggregate team and league — pass team_league so shared-city pairs
+    # (CHC/CWS, LAD/LAA, NYM/NYY) don't bleed into each other's filters.
     _tick(f"Aggregating {team_abbr}'s qualified-player stats vs the rest of MLB")
-    team_bat_df = _filter_team(batting,  bref_team)
-    team_pit_df = _filter_team(pitching, bref_team)
+    team_bat_df = _filter_team(batting,  bref_team, league=team_league)
+    team_pit_df = _filter_team(pitching, bref_team, league=team_league)
 
     team_bat   = aggregate_batting(team_bat_df)
     team_pit   = aggregate_pitching(team_pit_df)
@@ -1337,8 +1373,10 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
         raise ValueError(f"Unknown team abbreviation: {team_abbr}")
     if opponent_abbr not in TEAM_ABBR_TO_BREF:
         raise ValueError(f"Unknown opponent abbreviation: {opponent_abbr}")
-    bref_team     = TEAM_ABBR_TO_BREF[team_abbr]
-    bref_opponent = TEAM_ABBR_TO_BREF[opponent_abbr]
+    bref_team       = TEAM_ABBR_TO_BREF[team_abbr]
+    bref_opponent   = TEAM_ABBR_TO_BREF[opponent_abbr]
+    team_league     = TEAM_ABBR_TO_LEAGUE.get(team_abbr)
+    opponent_league = TEAM_ABBR_TO_LEAGUE.get(opponent_abbr)
     t0 = time.time()
 
     _tick(f"Loading {evaluation_year} batting and pitching CSVs")
@@ -1354,8 +1392,8 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
     catcher_df = _try_read(f"catcher_defense_{evaluation_year}.csv")
 
     _tick(f"Aggregating {team_abbr}'s top hitters and {opponent_abbr}'s top pitchers")
-    team_bat_df = _filter_team(batting,  bref_team)
-    opp_pit_df  = _filter_team(pitching, bref_opponent)
+    team_bat_df = _filter_team(batting,  bref_team,     league=team_league)
+    opp_pit_df  = _filter_team(pitching, bref_opponent, league=opponent_league)
     team_hitters     = _top_hitters(team_bat_df,  n=12)
     opponent_pitchers = _top_pitchers(opp_pit_df, n=5)
 
@@ -1401,7 +1439,8 @@ def run_opponent_scouting_simple(opponent_abbr: str = "HOU",
 
     if opponent_abbr not in TEAM_ABBR_TO_BREF:
         raise ValueError(f"Unknown team abbreviation: {opponent_abbr}")
-    bref_team = TEAM_ABBR_TO_BREF[opponent_abbr]
+    bref_team       = TEAM_ABBR_TO_BREF[opponent_abbr]
+    opponent_league = TEAM_ABBR_TO_LEAGUE.get(opponent_abbr)
     t0 = time.time()
 
     _tick(f"Loading {evaluation_year} batting and pitching CSVs")
@@ -1409,8 +1448,8 @@ def run_opponent_scouting_simple(opponent_abbr: str = "HOU",
     pitching = pd.read_csv(DATA_RAW / f"pitching_{evaluation_year}.csv", encoding="utf-8")
 
     _tick(f"Aggregating {opponent_abbr}'s offense + pitching vs the rest of MLB")
-    team_bat_df = _filter_team(batting,  bref_team)
-    team_pit_df = _filter_team(pitching, bref_team)
+    team_bat_df = _filter_team(batting,  bref_team, league=opponent_league)
+    team_pit_df = _filter_team(pitching, bref_team, league=opponent_league)
 
     team_bat   = aggregate_batting(team_bat_df)
     team_pit   = aggregate_pitching(team_pit_df)
