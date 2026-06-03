@@ -195,6 +195,36 @@ except Exception as e:                                          # noqa: BLE001
     traceback.print_exc()
 
 
+# ── Test 8: targets vs pricing comparables dedup invariant ────────────────
+# Regression for the bug where pricing comparables overlapped with recommended
+# targets (e.g., 2 of 3 comparables were the same players already shown as
+# targets). Fix: ``_pick_pricing_comparables`` now accepts ``exclude_names``
+# and both pickers collapse to one row per distinct player_name.
+print("\n=== Test 8: targets vs comparables dedup invariant ===")
+try:
+    violations = []
+    for team in ["CHC", "OAK", "KC", "PIT", "COL", "MIA"]:
+        r = run_gap_filler_simple(team, max_budget=120_000_000, evaluation_year=2024)
+        for g in r["gaps_results"]:
+            pos     = g["gap"]["position"]
+            targets = [t["player_name"] for t in g["targets"]]
+            comps   = [c["player_name"] for c in g["pricing_comparables"]]
+            tdup    = len(targets) - len(set(targets))
+            cdup    = len(comps)   - len(set(comps))
+            cross   = set(targets) & set(comps)
+            if tdup or cdup or cross:
+                violations.append((team, pos, tdup, cdup, sorted(cross)))
+    if violations:
+        _fail("dedup invariant violated",
+              f"({len(violations)} gap(s): {violations[:3]} ...)")
+    else:
+        _ok("targets ⊥ comparables across 6 teams (3 gaps × 6 = 18 gaps tested)",
+            "(no duplicates, no overlap)")
+except Exception as e:                                          # noqa: BLE001
+    _fail("dedup invariant test crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
 # ── Summary ────────────────────────────────────────────────────────────────
 print("\n" + "=" * 60)
 print(f"EDGE-CASE SMOKE TEST: {PASS} passed · {WARN} warned · {FAIL} failed")

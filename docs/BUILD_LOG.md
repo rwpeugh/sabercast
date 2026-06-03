@@ -807,3 +807,30 @@ This is honest, defensible, and bounds the claims to what the data actually supp
 
 
 
+
+
+---
+
+## Entry 19 — June 3 (Polish): Pricing comparables ⊥ recommended targets
+
+**User-reported observation.** *"Still seeing a lot of the pricing comparisons being the same player as recommended targets. Is that a real data limitation or does the tool need updating?"*
+
+**Diagnosis.** Two issues, not one.
+
+1. **Cross-list overlap by design.** `_pick_targets` ranks by stat-fit score (budget-limited); `_pick_pricing_comparables` ranks by AAV (no budget cap). Both draw from the same `_filter_eligible_pool(position, evaluation_year)`. The best statistical fit at a scarce position is usually also the highest-paid contract, so top-3 by fit and top-3 by AAV concentrated on the same handful of stars. The pre-existing `is_also_target` flag labeled the overlap in the UI but did not remove it — so the user kept seeing 6 cards per gap where 1–2 were duplicates.
+2. **Within-list duplicate names.** Some players appear in `contracts.csv` + `contracts_extended.csv` with multiple separate signings (e.g., Carlos Correa's rescinded SF deal AND his eventual MIN deal). Sorting by AAV desc and taking head(3) without grouping let the same player land twice in the same comparables list. PIT/MIA at SS surfaced Carlos Correa twice; KC at RP surfaced Edwin Diaz twice.
+
+**Fix.**
+- `_pick_pricing_comparables` accepts `exclude_names: set[str] | None`; the orchestrator passes the just-picked target names through so the comparables pool is filtered before the AAV sort.
+- Both `_pick_targets` and `_pick_pricing_comparables` now collapse to one row per distinct `player_name`, keeping the highest-ranked instance (highest fit-score for targets, highest AAV for comparables).
+- The `is_also_target` flag is preserved as a defensive belt-and-suspenders check — after the explicit dedup it should always evaluate False, but if anything ever bypasses the filter (e.g., name-formatting mismatch) the UI badge still surfaces it.
+
+**Verification.** Smoke-tested across 7 teams (CHC, OAK, KC, PIT, COL, MIA, CLE), 21 gaps total, zero duplicates and zero cross-list overlap. PIT/MIA SS now correctly returns `Carlos Correa, Francisco Lindor, Trea Turner` as distinct comparables; KC RP returns `Edwin Diaz, Josh Hader, ...` instead of `Edwin Diaz, Edwin Diaz, ...`. Added Test 8 to `demo/smoke_test_edge_cases.py` as a permanent regression check covering 6 teams × 3 gaps = 18 gap-pairs.
+
+**Why this is worth a build-log entry.** It is the kind of soft bug that does not crash anything, does not show up in any of the 10 pre-registered statistical tests, but degrades the user-facing experience the moment a viewer with domain knowledge inspects an actual Gap Filler card. Catching it during the polish phase is exactly what the manual review pass is for.
+
+**Updated artifacts:**
+- `core/orchestrator.py` — `_pick_targets`, `_pick_pricing_comparables`, `run_gap_filler_simple`
+- `demo/smoke_test_edge_cases.py` — Test 8 regression invariant
+
+---

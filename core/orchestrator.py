@@ -890,7 +890,7 @@ def _build_target_row(row: pd.Series, stats: dict | None, fit: float) -> dict:
 def _pick_targets(contracts: pd.DataFrame, batting: pd.DataFrame,
                   pitching: pd.DataFrame, position: str, evaluation_year: int,
                   single_signing_ceiling: float, k: int = 3) -> list[dict]:
-    """Top-k acquisition targets at this position, ranked by 2024 statistical fit.
+    """Top-k acquisition targets at this position, ranked by statistical fit.
 
     A *target* differs from a *pricing comparable*: targets are players whose
     on-field production would most improve the team at this gap, subject to a
@@ -898,8 +898,8 @@ def _pick_targets(contracts: pd.DataFrame, batting: pd.DataFrame,
     ``_pick_pricing_comparables``) are top-AAV contracts at the position and
     are the LLM's reference points for what such a player would cost.
 
-    The two lists can and often will overlap — the best statistical fit at a
-    scarce position is usually also the highest-paid contract.
+    The caller dedupes the comparables against the targets so the user always
+    sees ``k`` distinct targets + ``k`` distinct comparables per gap.
     """
     pool = _filter_eligible_pool(contracts, position, evaluation_year)
     if pool.empty:
@@ -917,22 +917,51 @@ def _pick_targets(contracts: pd.DataFrame, batting: pd.DataFrame,
 
     # Sort by fit_score desc; tiebreak by AAV desc (better contract = more proven).
     enriched.sort(key=lambda r: (r["fit_score"], r["aav"] or 0), reverse=True)
-    return enriched[:k]
+    # Some stars appear multiple times in the contracts data (different signings
+    # of the same player). Collapse to one row per distinct player_name, keeping
+    # the highest-ranked instance.
+    seen: set[str] = set()
+    deduped: list[dict] = []
+    for r in enriched:
+        name = r.get("player_name")
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(r)
+        if len(deduped) >= k:
+            break
+    return deduped
 
 
 def _pick_pricing_comparables(contracts: pd.DataFrame, batting: pd.DataFrame,
                               pitching: pd.DataFrame, position: str,
-                              evaluation_year: int, k: int = 3) -> list[dict]:
+                              evaluation_year: int, k: int = 3,
+                              exclude_names: set[str] | None = None) -> list[dict]:
     """Top-k contracts at the position by AAV. These are the LLM's pricing anchors.
 
     Same eligibility filter as ``_pick_targets`` (no look-ahead), but no budget
     ceiling — the very biggest comparable signings are valuable pricing context
     even if they would themselves be unaffordable for a small/mid-market team.
+
+    ``exclude_names`` (typically the names of recommended targets) lets the
+    caller suppress overlap with the targets list. With the orchestrator's
+    default flow, comparables are picked AFTER targets and exclude them by
+    name — so the user sees 3 distinct targets + 3 distinct market benchmarks
+    rather than overlapping cards labeled "also target".
     """
     pool = _filter_eligible_pool(contracts, position, evaluation_year)
     if pool.empty:
         return []
-    pool = pool.sort_values("aav", ascending=False).head(k)
+    if exclude_names:
+        pool = pool[~pool["player_name"].astype(str).isin(exclude_names)]
+        if pool.empty:
+            return []
+    # Sort by AAV desc, then collapse to one row per player (keep highest AAV).
+    # Some stars appear in the contracts dataset with multiple separate signings
+    # (e.g., Carlos Correa's rescinded SF deal + his eventual MIN deal). For
+    # pricing-anchor purposes we want one row per distinct player.
+    pool = pool.sort_values("aav", ascending=False)
+    pool = pool.drop_duplicates(subset=["player_name"], keep="first").head(k)
     rows = []
     for _, row in pool.iterrows():
         stats = _lookup_player_stats(row["player_name"], batting, pitching, row["position"])
@@ -1100,8 +1129,10 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             targets = _pick_targets(contracts, batting, pitching, pos,
                                     evaluation_year,
                                     single_signing_ceiling, k=3)
+        target_names = {t.get("player_name") for t in targets if t.get("player_name")}
         pricing_comparables = _pick_pricing_comparables(
             contracts, batting, pitching, pos, evaluation_year, k=3,
+            exclude_names=target_names,
         )
         prepared_gaps.append({
             "idx":                 idx,
