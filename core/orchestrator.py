@@ -972,7 +972,21 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
     _tick("Loading 2024 batting, pitching, contract, and defensive CSVs")
     batting   = pd.read_csv(DATA_RAW / "batting_2024.csv",  encoding="utf-8")
     pitching  = pd.read_csv(DATA_RAW / "pitching_2024.csv", encoding="utf-8")
-    contracts = pd.read_csv(DATA_RAW / "contracts.csv",     encoding="utf-8")
+
+    # Use the combined contract pool — original top-100/manual list (115 rows)
+    # PLUS the Spotrac yearly FA tracker scrape (~1,139 mid-tier signings).
+    # Total ~1,254. Matches the pool the precision@10 test validated against;
+    # gives the live app the broader candidate set its evaluation justifies.
+    # No-look-ahead is enforced inside player_matcher.find_matches and the
+    # _pick_targets / _pick_pricing_comparables helpers regardless of pool size.
+    contracts_main = pd.read_csv(DATA_RAW / "contracts.csv", encoding="utf-8")
+    ext_path = DATA_RAW / "contracts_extended.csv"
+    if ext_path.exists():
+        contracts_ext = pd.read_csv(ext_path, encoding="utf-8")
+        # Align columns; pd.concat fills missing with NaN
+        contracts = pd.concat([contracts_main, contracts_ext], ignore_index=True)
+    else:
+        contracts = contracts_main
 
     # Defensive CSVs are optional — Day 1 sprint runs without them. Treat as best-effort.
     def _try_read(name: str) -> pd.DataFrame | None:
