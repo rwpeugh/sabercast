@@ -237,11 +237,11 @@ def build_png() -> None:
     _text(ax, fx(0.75), fy(0.45), "Sabercast",
           size=46, weight="bold", color=NAVY)
     _text(ax, fx(0.75), fy(1.10),
-          "LLM-powered MLB front-office intelligence",
+          "From roster gaps to ranked free-agent targets — in 13 seconds.",
           size=15, weight="bold", color=SLATE)
     _text(ax, fx(0.75), fy(1.40),
-          "Built for small / mid-market clubs that need analyst leverage "
-          "without a 20-person R&D shop.",
+          "Plus lineup planning and series scouting. Built for small / mid-market "
+          "MLB front offices needing analyst leverage without a 20-person R&D shop.",
           size=11.5, color=GRAY, style="italic")
     _hline(ax, 0.75, 1.78, 11.85, ACCENT, lw=2.5)
 
@@ -253,10 +253,10 @@ def build_png() -> None:
     gap     = 0.20
     card_w  = (band_w - 3 * gap) / 4
     cards = [
-        ("+70pp",  "RAG accuracy lift", "20 Qs · McNemar p=0.0005", GOOD,    GOOD_BG),
-        ("3.1×",   "Precision@10 vs random", "n=43 · z=5.66 · p<0.0001", GOOD,    GOOD_BG),
-        ("59.9%",  "Position hit-rate",  "p=0.012 · 2B 74% (p=0.011)", GOOD,    GOOD_BG),
-        ("4 / 10", "Significant findings", "5 nulls reported honestly", NEUTRAL, NEUT_BG),
+        ("13 sec", "Gap diagnosis to targets", "12 LLM calls parallelized",   GOOD, GOOD_BG),
+        ("+70pp",  "RAG accuracy lift",        "20 Qs · McNemar p=0.0005",     GOOD, GOOD_BG),
+        ("3.1×",   "Precision@10 lift",        "n=43 · p<0.0001 · finds signings", GOOD, GOOD_BG),
+        ("59.9%",  "Position-gap hit rate",    "p=0.012 · 2B 74% (p=0.011)",   GOOD, GOOD_BG),
     ]
     for i, (head, label, detail, accent, bg) in enumerate(cards):
         x = band_x + i * (card_w + gap)
@@ -284,22 +284,22 @@ def build_png() -> None:
            preserve_aspect=True, zorder=7,
            crop_box=(0.21, 0.03, 1.00, 0.78))
     _text(ax, fx(screen_x + 0.05), fy(body_y + body_h + 0.30),
-          "Live Gap Filler output — gap diagnosis + 3 recommended targets + pricing comparables",
+          "Position gap diagnosed  ·  3 free-agent targets ranked  ·  3 pricing comparables",
           size=9, color=GRAY, style="italic")
 
     # ─── RIGHT COLUMN: three short blocks ──────────────────────────────
     col_top = body_y + 0.05
-    # Block 1 — three tabs
+    # Block 1 — three GM-office jobs (outcome-framed, not feature-framed)
     _text(ax, fx(techcol_x), fy(col_top),
-          "THREE WORKFLOWS", size=10.5, weight="bold", color=ACCENT)
+          "THREE GM-OFFICE JOBS", size=10.5, weight="bold", color=ACCENT)
     _text(ax, fx(techcol_x), fy(col_top + 0.25),
-          "• Roster Builder — day-to-day lineup",
+          "• Plan tonight's lineup vs. the opponent",
           size=9.5, color=SLATE)
     _text(ax, fx(techcol_x), fy(col_top + 0.46),
-          "• Opponent Scouting — threats + plan",
+          "• Scout the team you're facing",
           size=9.5, color=SLATE)
     _text(ax, fx(techcol_x), fy(col_top + 0.67),
-          "• Gap Filler — diagnosis + RAG targets",
+          "• Diagnose roster gaps + rank FA targets",
           size=9.5, color=SLATE)
 
     # Block 2 — data + LLM stack
@@ -326,10 +326,10 @@ def build_png() -> None:
     framing_y = 6.15
     _hline(ax, 0.75, framing_y, 11.85, NAVY, lw=1.5)
     _text(ax, fx(0.75), fy(framing_y + 0.22),
-          "Diagnostic + retrieval tool — NOT a wins forecaster.",
+          "Decision-support tool — not a wins forecaster.",
           size=12, weight="bold", color=NAVY)
     _text(ax, fx(12.60), fy(framing_y + 0.22),
-          "Five wins-prediction nulls reported plainly.",
+          "10 pre-registered tests  ·  4 significant  ·  5 honest nulls reported",
           size=10, color=GRAY, ha="right", style="italic")
 
     # ─── FOOTER: Powered-by logo strip (own row) ──────────────────────
@@ -339,7 +339,7 @@ def build_png() -> None:
     url_y = 7.25
     _hline(ax, 0.75, url_y - 0.10, 11.85, GRAY, lw=0.6)
     _text(ax, fx(0.75), fy(url_y),
-          "Live  ·  sabercast-mlb.streamlit.app",
+          "Try the live app  ·  sabercast-mlb.streamlit.app",
           size=10, weight="bold", color=NAVY, va="center")
     _text(ax, fx(PW / 2), fy(url_y),
           "MKTG 569  ·  Spring 2026",

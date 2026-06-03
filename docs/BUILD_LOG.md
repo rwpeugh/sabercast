@@ -869,3 +869,52 @@ This is honest, defensible, and bounds the claims to what the data actually supp
 **What I left alone.** The Gap Filler screenshot used on the slide (`docs/checkpoint3/03_top_gap_card_with_candidates.png`) was captured pre-Entry-19 dedup fix, so it visibly contains the overlap bug (Marcus Semien appearing in both targets and pricing comparables). At slide thumbnail size the names aren't readable, so the visual is fine for the pitch — but a future polish pass should regenerate this screenshot post-dedup.
 
 ---
+
+---
+
+## Entry 21 — June 3 (Polish): Rebalance pitch slide for buyer + judge dual-audience
+
+**Trigger.** The previous pitch slide was framed entirely for the academic judges — leading with statistical findings, build economics, and the "honest null" tile. A prospective user (a researcher in an MLB GM's office, an analyst at a small/mid-market club) reading the slide cold would have no obvious answer to "what does this do FOR me on Monday morning?"
+
+**Rebalance.** Reorganized so the slide lands the buyer-value proposition first, while preserving every element a judge needs to grade the project.
+
+**Title block (rewritten).**
+- Tagline 1 (bold): "From roster gaps to ranked free-agent targets — in 13 seconds." (outcome + speed — what they'll feel using it)
+- Tagline 2 (italic): "Plus lineup planning and series scouting. Built for small / mid-market MLB front offices needing analyst leverage without a 20-person R&D shop." (scope + target customer)
+
+**Hero stat band (reordered + one swap).**
+- Card 1: **`13 sec`** / Gap diagnosis to targets / 12 LLM calls parallelized — *NEW buyer-speed hook*
+- Card 2: **`+70pp`** / RAG accuracy lift / p=0.0005 — *moved from card 1, still flagship eval finding*
+- Card 3: **`3.1×`** / Precision@10 lift / p<0.0001 · finds signings — *strongest p-value*
+- Card 4: **`59.9%`** / Position-gap hit rate / p=0.012 · 2B 74% — *unchanged*
+
+The previous "4 / 10 significant findings" amber tile is gone; the honest-null signal moves to the bottom framing line where it's actually *more* visible to a judge skimming for academic integrity.
+
+**Right column (Block 1 reframe).**
+- Was: "THREE WORKFLOWS" with feature bullets (Roster Builder, Opponent Scouting, Gap Filler)
+- Now: "THREE GM-OFFICE JOBS" with outcome bullets ("Plan tonight's lineup vs. the opponent", "Scout the team you're facing", "Diagnose roster gaps + rank FA targets")
+
+Blocks 2-3 (DATA + LLM STACK, BUILD ECONOMICS) are unchanged — these stay for the judges and for any technical buyer evaluating credibility.
+
+**Screenshot caption.**
+- Was: "Live Gap Filler output — gap diagnosis + 3 recommended targets + pricing comparables"
+- Now: "Position gap diagnosed · 3 free-agent targets ranked · 3 pricing comparables"
+- Reads as a user-facing pipeline rather than a technical readout.
+
+**Honest-framing line (preserved, sharper).**
+- Left: "Decision-support tool — not a wins forecaster." (softer than "Diagnostic + retrieval tool — NOT a wins forecaster"; still anchors the limitation)
+- Right: "10 pre-registered tests · 4 significant · 5 honest nulls reported" (more explicit + scannable than "Five wins-prediction nulls reported plainly" — the judge sees both the numerator and the denominator of the integrity claim)
+
+**URL strip (CTA).**
+- Was: "Live · sabercast-mlb.streamlit.app"
+- Now: "Try the live app · sabercast-mlb.streamlit.app" — actionable verb instead of passive label
+
+**Net effect.** Judges still see all 4 significant findings with p-values, the full tech stack, build economics, and the honest-null integrity claim. A cold buyer (front-office analyst) now gets answered in the order they'd want answered: (1) what does this do for me? (2) how fast is it? (3) is it accurate? (4) what does the output look like? (5) is it honest about its limits? (6) where do I try it?
+
+**Updated artifacts:**
+- `demo/render_pitch_slide_png.py` — title text, hero card order, right-column block 1, caption, framing line, URL strip
+- `demo/generate_pitch_slide.py` — same edits mirrored for the PPTX
+- `docs/demo/Sabercast_Pitch_Slide.png` — regenerated
+- `docs/demo/Sabercast_Pitch_Slide.pptx` — regenerated
+
+---

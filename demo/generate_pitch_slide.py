@@ -187,12 +187,12 @@ def build_slide() -> None:
     # ─── TITLE BLOCK ────────────────────────────────────────────────────
     _add_text(slide, 0.75, 0.30, 9.0, 0.85, "Sabercast",
               size=42, bold=True, color=NAVY)
-    _add_text(slide, 0.75, 1.10, 9.0, 0.35,
-              "LLM-powered MLB front-office intelligence",
+    _add_text(slide, 0.75, 1.10, 11.0, 0.35,
+              "From roster gaps to ranked free-agent targets — in 13 seconds.",
               size=15, bold=True, color=SLATE)
     _add_text(slide, 0.75, 1.42, 11.0, 0.35,
-              "Built for small / mid-market clubs that need analyst leverage "
-              "without a 20-person R&D shop.",
+              "Plus lineup planning and series scouting. Built for small / mid-market "
+              "MLB front offices needing analyst leverage without a 20-person R&D shop.",
               size=11.5, italic=True, color=GRAY)
     _add_box(slide, 0.75, 1.78, 11.85, 0.025, ACCENT)
 
@@ -204,10 +204,10 @@ def build_slide() -> None:
     gap     = 0.20
     card_w  = (band_w - 3 * gap) / 4
     cards = [
-        ("+70pp",  "RAG accuracy lift",    "20 Qs · McNemar p=0.0005",   GOOD,    GOOD_BG),
-        ("3.1×",   "Precision@10 vs random","n=43 · z=5.66 · p<0.0001",   GOOD,    GOOD_BG),
-        ("59.9%",  "Position hit-rate",    "p=0.012 · 2B 74% (p=0.011)", GOOD,    GOOD_BG),
-        ("4 / 10", "Significant findings", "5 nulls reported honestly",  NEUTRAL, NEUT_BG),
+        ("13 sec", "Gap diagnosis to targets", "12 LLM calls parallelized",        GOOD, GOOD_BG),
+        ("+70pp",  "RAG accuracy lift",        "20 Qs · McNemar p=0.0005",         GOOD, GOOD_BG),
+        ("3.1×",   "Precision@10 lift",        "n=43 · p<0.0001 · finds signings", GOOD, GOOD_BG),
+        ("59.9%",  "Position-gap hit rate",    "p=0.012 · 2B 74% (p=0.011)",       GOOD, GOOD_BG),
     ]
     for i, (head, label, detail, accent, bg) in enumerate(cards):
         x = band_x + i * (card_w + gap)
@@ -228,17 +228,17 @@ def build_slide() -> None:
     _add_image(slide, SHOTS / "03_top_gap_card_with_candidates.png",
                x=screen_x, y=body_y, w=screen_w, h=body_h, preserve_aspect=True)
     _add_text(slide, screen_x, body_y + body_h + 0.05, screen_w, 0.22,
-              "Live Gap Filler output — gap diagnosis + 3 recommended targets + pricing comparables",
+              "Position gap diagnosed  ·  3 free-agent targets ranked  ·  3 pricing comparables",
               size=9, italic=True, color=GRAY)
 
-    # Right column — three concise blocks
+    # Right column — three concise blocks (Block 1 is outcome-framed for buyers)
     col_top = body_y + 0.00
     _add_text(slide, techcol_x, col_top + 0.00, techcol_w, 0.25,
-              "THREE WORKFLOWS", size=10.5, bold=True, color=ACCENT)
+              "THREE GM-OFFICE JOBS", size=10.5, bold=True, color=ACCENT)
     _add_text(slide, techcol_x, col_top + 0.27, techcol_w, 0.75,
-              "• Roster Builder — day-to-day lineup\n"
-              "• Opponent Scouting — threats + plan\n"
-              "• Gap Filler — diagnosis + RAG targets",
+              "• Plan tonight's lineup vs. the opponent\n"
+              "• Scout the team you're facing\n"
+              "• Diagnose roster gaps + rank FA targets",
               size=10, color=SLATE)
 
     _add_text(slide, techcol_x, col_top + 1.00, techcol_w, 0.25,
@@ -258,19 +258,19 @@ def build_slide() -> None:
     # ─── HONEST-FRAMING LINE ───────────────────────────────────────────
     framing_y = 6.15
     _add_box(slide, 0.75, framing_y, 11.85, 0.025, NAVY)
-    _add_text(slide, 0.75, framing_y + 0.10, 7.5, 0.30,
-              "Diagnostic + retrieval tool — NOT a wins forecaster.",
+    _add_text(slide, 0.75, framing_y + 0.10, 7.0, 0.30,
+              "Decision-support tool — not a wins forecaster.",
               size=12, bold=True, color=NAVY)
-    _add_text(slide, 8.0, framing_y + 0.12, 4.60, 0.30,
-              "Five wins-prediction nulls reported plainly.",
+    _add_text(slide, 7.0, framing_y + 0.12, 5.60, 0.30,
+              "10 pre-registered tests  ·  4 significant  ·  5 honest nulls reported",
               size=10, italic=True, color=GRAY, align=PP_ALIGN.RIGHT)
 
     # ─── FOOTER: Powered-by logos + URL strip ──────────────────────────
     _logo_strip(slide, y=6.70, logo_h=0.40)
 
     _add_box(slide, 0.75, 7.15, 11.85, 0.015, GRAY)
-    _add_text(slide, 0.75, 7.20, 5.0, 0.25,
-              "Live  ·  sabercast-mlb.streamlit.app",
+    _add_text(slide, 0.75, 7.20, 5.5, 0.25,
+              "Try the live app  ·  sabercast-mlb.streamlit.app",
               size=10, bold=True, color=NAVY)
     _add_text(slide, 5.5, 7.20, 2.5, 0.25,
               "MKTG 569  ·  Spring 2026",
