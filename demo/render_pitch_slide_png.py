@@ -1,6 +1,8 @@
-"""demo/render_pitch_slide_png.py — render the same layout as
-generate_pitch_slide.py to a PNG using matplotlib. Useful for embedding the
-pitch slide in the README or sharing without opening PowerPoint.
+"""demo/render_pitch_slide_png.py — render the Sabercast pitch slide to PNG.
+
+This is the image-rich version of the slide: title + hero stat band +
+product screenshot + concise tech column + vendor-logo footer. The same
+layout is mirrored in ``generate_pitch_slide.py`` for the PPTX output.
 
 Output: docs/demo/Sabercast_Pitch_Slide.png
 """
@@ -12,20 +14,53 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyBboxPatch
+from PIL import Image
+import numpy as np
 
 
 ROOT     = Path(__file__).resolve().parent.parent
 OUT_PATH = ROOT / "docs" / "demo" / "Sabercast_Pitch_Slide.png"
 
-# Color palette mirrored from generate_pitch_slide.py
+LOGOS    = ROOT / "docs" / "demo" / "logos"
+SHOTS    = ROOT / "docs" / "checkpoint3"
+
+# Colour palette
 NAVY    = "#102A55"
 SLATE   = "#334455"
 GRAY    = "#667080"
 LIGHT   = "#F0F2F5"
+CREAM   = "#FAFBFC"
 ACCENT  = "#3A82CD"
 GOOD    = "#2E863E"
+GOOD_BG = "#E8F4EA"
 NEUTRAL = "#C08C00"
+NEUT_BG = "#FBF3DC"
 
+# PPT slide is 13.333" x 7.5"; matplotlib axes are normalised [0,1].
+PW, PH = 13.333, 7.5
+
+
+def fx(inches: float) -> float:
+    return inches / PW
+
+
+def fy(inches: float) -> float:
+    """Convert top-down inch coord to matplotlib bottom-up [0,1]."""
+    return 1 - (inches / PH)
+
+
+def fw(inches: float) -> float:
+    return inches / PW
+
+
+def fh(inches: float) -> float:
+    return inches / PH
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Drawing helpers
+# ─────────────────────────────────────────────────────────────────────────
 
 def _text(ax, x, y, txt, *, size=12, weight="normal", color=SLATE,
           ha="left", va="top", style="normal"):
@@ -34,153 +69,287 @@ def _text(ax, x, y, txt, *, size=12, weight="normal", color=SLATE,
             family="DejaVu Sans")
 
 
-def _hline(ax, x, y, w, color, lw=2):
-    ax.add_patch(patches.Rectangle((x, y), w, 0.004, color=color,
-                                    transform=ax.transAxes, clip_on=False))
+def _hline(ax, x_in, y_in, w_in, color, lw=2):
+    ax.add_patch(patches.Rectangle((fx(x_in), fy(y_in)), fw(w_in), 0.004,
+                                    color=color, transform=ax.transAxes,
+                                    clip_on=False))
 
+
+def _rect(ax, x_in, y_in, w_in, h_in, *, color, alpha=1.0, zorder=2,
+          round_pad=0.0):
+    """Filled rectangle. If round_pad > 0, draws a rounded box."""
+    x = fx(x_in)
+    y = fy(y_in + h_in)
+    w = fw(w_in)
+    h = fh(h_in)
+    if round_pad > 0:
+        box = FancyBboxPatch((x, y), w, h, boxstyle=f"round,pad=0,rounding_size={round_pad}",
+                              linewidth=0, facecolor=color, alpha=alpha, zorder=zorder,
+                              transform=ax.transAxes)
+        ax.add_patch(box)
+    else:
+        ax.add_patch(patches.Rectangle((x, y), w, h, facecolor=color, edgecolor="none",
+                                        alpha=alpha, zorder=zorder, transform=ax.transAxes))
+
+
+def _border(ax, x_in, y_in, w_in, h_in, *, color=ACCENT, lw=1.2, zorder=3,
+            round_pad=0.0):
+    x = fx(x_in)
+    y = fy(y_in + h_in)
+    w = fw(w_in)
+    h = fh(h_in)
+    if round_pad > 0:
+        box = FancyBboxPatch((x, y), w, h,
+                              boxstyle=f"round,pad=0,rounding_size={round_pad}",
+                              linewidth=lw, edgecolor=color, facecolor="none",
+                              zorder=zorder, transform=ax.transAxes)
+        ax.add_patch(box)
+    else:
+        ax.add_patch(patches.Rectangle((x, y), w, h, facecolor="none", edgecolor=color,
+                                        linewidth=lw, zorder=zorder, transform=ax.transAxes))
+
+
+def _image(ax, path: Path, x_in: float, y_in: float, w_in: float, h_in: float,
+           *, alpha=1.0, zorder=10, preserve_aspect=True,
+           crop_box: tuple | None = None):
+    """Place an image at (x_in, y_in) with width/height in inches.
+
+    If ``preserve_aspect`` is True, the image is centered inside the (w, h)
+    slot at its true aspect ratio.
+
+    ``crop_box`` is an optional (left_frac, top_frac, right_frac, bottom_frac)
+    tuple in [0,1] to crop the source image before placement.
+    """
+    if not path.exists():
+        print(f"  warn: missing image {path}")
+        return
+    img = Image.open(path).convert("RGBA")
+    if crop_box is not None:
+        l, t, r, b = crop_box
+        W, H = img.size
+        img = img.crop((int(W*l), int(H*t), int(W*r), int(H*b)))
+    img_arr = np.asarray(img)
+    ih, iw = img_arr.shape[:2]
+    img_aspect = iw / ih
+
+    if preserve_aspect:
+        slot_aspect = w_in / h_in
+        if img_aspect > slot_aspect:
+            actual_w = w_in
+            actual_h = w_in / img_aspect
+        else:
+            actual_h = h_in
+            actual_w = h_in * img_aspect
+        cx = x_in + (w_in - actual_w) / 2
+        cy = y_in + (h_in - actual_h) / 2
+    else:
+        actual_w = w_in
+        actual_h = h_in
+        cx = x_in
+        cy = y_in
+
+    extent = [fx(cx), fx(cx + actual_w), fy(cy + actual_h), fy(cy)]
+    ax.imshow(img_arr, extent=extent, alpha=alpha, zorder=zorder,
+              aspect="auto", interpolation="bilinear")
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Component blocks
+# ─────────────────────────────────────────────────────────────────────────
+
+def _stat_card(ax, x_in: float, y_in: float, w_in: float, h_in: float,
+               headline: str, label: str, detail: str, *, accent=GOOD,
+               bg=GOOD_BG):
+    """One big-number stat card. Filled rounded panel + headline + sublabel."""
+    _rect(ax, x_in, y_in, w_in, h_in, color=bg, alpha=0.55, zorder=2,
+          round_pad=0.015)
+    _border(ax, x_in, y_in, w_in, h_in, color=accent, lw=1.0, zorder=3,
+            round_pad=0.015)
+    # Big headline number
+    _text(ax, fx(x_in + w_in/2), fy(y_in + 0.35), headline,
+          size=32, weight="bold", color=accent, ha="center", va="center")
+    # Label
+    _text(ax, fx(x_in + w_in/2), fy(y_in + 0.78), label,
+          size=10, weight="bold", color=SLATE, ha="center", va="center")
+    # p-value / detail
+    _text(ax, fx(x_in + w_in/2), fy(y_in + 1.05), detail,
+          size=8.5, color=GRAY, ha="center", va="center", style="italic")
+
+
+def _logo_strip(ax, y_in: float, logo_h: float = 0.55):
+    """Powered-by row: 5 logos centered with a label prefix.
+
+    ``y_in`` is the vertical center of the logo band.
+    ``logo_h`` is the slot height in inches. Logos preserve their aspect ratio
+    inside their slot, so smaller logo_h = shorter logos.
+    """
+    # Logo files + nominal widths (inches in PPT space). We let preserve_aspect
+    # do the math so we just need rough slot sizes.
+    items = [
+        ("openai.png.png",           0.80),
+        ("together_ai.png.png",      0.80),
+        ("chromadb.png",             0.65),
+        ("streamlit.png.png",        0.65),
+        ("Baseball_Reference_Logo.svg.png", 1.30),
+    ]
+    label_w = 1.15
+    gap     = 0.40
+    total_w = label_w + sum(w for _, w in items) + gap * len(items)
+    start_x = (PW - total_w) / 2
+
+    # Label — vertically centered on y_in
+    _text(ax, fx(start_x + label_w * 0.5), fy(y_in + logo_h / 2),
+          "Powered by", size=11, weight="bold", color=NAVY,
+          ha="center", va="center")
+
+    # Logos — slot top is y_in, slot height is logo_h
+    x_cursor = start_x + label_w + gap
+    for fname, w in items:
+        _image(ax, LOGOS / fname, x_cursor, y_in, w, logo_h,
+               preserve_aspect=True, zorder=12)
+        x_cursor += w + gap
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Main slide builder
+# ─────────────────────────────────────────────────────────────────────────
 
 def build_png() -> None:
     OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    # 16:9 figure at 1920x1080 effective resolution
     fig, ax = plt.subplots(figsize=(16, 9), dpi=120)
     ax.set_xlim(0, 1)
     ax.set_ylim(0, 1)
     ax.axis("off")
-    ax.set_facecolor("white")
-    fig.patch.set_facecolor("white")
+    ax.set_facecolor(CREAM)
+    fig.patch.set_facecolor(CREAM)
 
-    # Convert PPT inch coords (13.333 x 7.5) into [0,1] using the same proportions.
-    # We'll work in normalized coords directly. PPT inch x / 13.333 -> 0..1
-    PW, PH = 13.333, 7.5
-    def fx(inches): return inches / PW
-    def fy(inches): return 1 - (inches / PH)   # invert (matplotlib y from bottom)
-    def fw(inches): return inches / PW
-    def fh(inches): return inches / PH
+    # ─── BACKGROUND: subtle diamond watermark, upper-right ─────────────
+    _image(ax, LOGOS / "baseball_diamond.png",
+           x_in=10.0, y_in=0.15, w_in=3.1, h_in=3.1,
+           preserve_aspect=True, alpha=0.07, zorder=1)
 
-    # ── Title ─────────────────────────────────────────────────────────────
-    _text(ax, fx(0.5), fy(0.35), "Sabercast",
-          size=44, weight="bold", color=NAVY)
-    _text(ax, fx(0.5), fy(1.0),
-          "LLM-powered MLB front-office intelligence — built for small / mid-market clubs",
-          size=14, color=SLATE)
-    _text(ax, fx(0.5), fy(1.30),
-          "that need analyst leverage without a 20-person R&D shop.",
-          size=14, color=SLATE)
-    _hline(ax, fx(0.5), fy(1.65) - 0.004, fw(12.333), ACCENT)
+    # ─── LEFT EDGE: vertical baseball-seam strand ──────────────────────
+    _image(ax, LOGOS / "seam_strand.png",
+           x_in=0.10, y_in=0.20, w_in=0.40, h_in=7.10,
+           preserve_aspect=False, alpha=0.90, zorder=4)
 
-    # ── Three columns ─────────────────────────────────────────────────────
-    col_w = 4.05
-    col_y = 1.95
-    col_label_size = 11
+    # ─── TITLE BLOCK ────────────────────────────────────────────────────
+    _text(ax, fx(0.75), fy(0.45), "Sabercast",
+          size=46, weight="bold", color=NAVY)
+    _text(ax, fx(0.75), fy(1.10),
+          "LLM-powered MLB front-office intelligence",
+          size=15, weight="bold", color=SLATE)
+    _text(ax, fx(0.75), fy(1.40),
+          "Built for small / mid-market clubs that need analyst leverage "
+          "without a 20-person R&D shop.",
+          size=11.5, color=GRAY, style="italic")
+    _hline(ax, 0.75, 1.78, 11.85, ACCENT, lw=2.5)
 
-    # LEFT — WHAT
-    cx = 0.5
-    _hline(ax, fx(cx), fy(col_y), fw(col_w), ACCENT, lw=3)
-    _text(ax, fx(cx), fy(col_y + 0.20),
-          "WHAT — three front-office workflows",
-          size=col_label_size, weight="bold", color=ACCENT)
-    left_text = (
-        "1.  Roster Builder\n"
-        "     Day-to-day lineup construction vs. a chosen opponent.\n"
-        "     One gpt-4o call → 9-slot lineup + matchup notes.\n"
-        "\n"
-        "2.  Opponent Scouting\n"
-        "     Narrative + top-3 threats + exploitable weaknesses\n"
-        "     + pitching / hitting strategy.\n"
-        "\n"
-        "3.  Gap Filler\n"
-        "     Top-3 roster gaps + position-matched candidate targets\n"
-        "     from a ChromaDB vectorstore + contract-cost forecasts.\n"
-        "     12 LLM calls running in parallel, ~13s end-to-end."
-    )
-    _text(ax, fx(cx), fy(col_y + 0.55), left_text, size=11, color=SLATE)
+    # ─── HERO STAT BAND (4 cards) ───────────────────────────────────────
+    cards_y = 1.95
+    cards_h = 1.15
+    band_x  = 0.75
+    band_w  = 11.85
+    gap     = 0.20
+    card_w  = (band_w - 3 * gap) / 4
+    cards = [
+        ("+70pp",  "RAG accuracy lift", "20 Qs · McNemar p=0.0005", GOOD,    GOOD_BG),
+        ("3.1×",   "Precision@10 vs random", "n=43 · z=5.66 · p<0.0001", GOOD,    GOOD_BG),
+        ("59.9%",  "Position hit-rate",  "p=0.012 · 2B 74% (p=0.011)", GOOD,    GOOD_BG),
+        ("4 / 10", "Significant findings", "5 nulls reported honestly", NEUTRAL, NEUT_BG),
+    ]
+    for i, (head, label, detail, accent, bg) in enumerate(cards):
+        x = band_x + i * (card_w + gap)
+        _stat_card(ax, x, cards_y, card_w, cards_h, head, label, detail,
+                   accent=accent, bg=bg)
 
-    # CENTER — HOW
-    cx = 0.5 + col_w + 0.4
-    _hline(ax, fx(cx), fy(col_y), fw(col_w), ACCENT, lw=3)
-    _text(ax, fx(cx), fy(col_y + 0.20),
-          "HOW — architecture",
-          size=col_label_size, weight="bold", color=ACCENT)
-    center_text = (
-        "Data ingest\n"
-        "    pybaseball · Spotrac · Statcast OAA + pop time\n"
-        "\n"
-        "LLM routing (cost-disciplined)\n"
-        "    gpt-4o                  — narrative reasoning\n"
-        "    gpt-4o-mini             — structured JSON output\n"
-        "    text-embedding-3-small  — RAG retrieval\n"
-        "    Qwen 2.5 7B + LoRA      — fine-tune (eval only)\n"
-        "\n"
-        "Storage\n"
-        "    ChromaDB persistent — 999 player profiles + 15 glossary\n"
-        "    1,254 contracts, no-look-ahead at every retrieval point\n"
-        "\n"
-        "Build economics\n"
-        "    9-day end-to-end build · ~$47 total platform spend\n"
-        "    Three vendor constraints absorbed mid-build"
-    )
-    _text(ax, fx(cx), fy(col_y + 0.55), center_text, size=10, color=SLATE,
-          ha="left")
+    # ─── MAIN BODY: screenshot (LEFT) + tech column (RIGHT) ─────────────
+    body_y     = 3.35
+    body_h     = 2.45
+    screen_x   = 0.75
+    screen_w   = 7.45
+    techcol_x  = 8.45
+    techcol_w  = 4.15
 
-    # RIGHT — RESULTS
-    cx = 0.5 + (col_w + 0.4) * 2
-    _hline(ax, fx(cx), fy(col_y), fw(col_w), ACCENT, lw=3)
-    _text(ax, fx(cx), fy(col_y + 0.20),
-          "RESULTS — 10 pre-registered tests, 4 significant",
-          size=col_label_size, weight="bold", color=ACCENT)
+    # Frame around the screenshot, then the screenshot itself.
+    _rect(ax, screen_x - 0.04, body_y - 0.04, screen_w + 0.08, body_h + 0.08,
+          color="white", alpha=1.0, zorder=5, round_pad=0.010)
+    _border(ax, screen_x - 0.04, body_y - 0.04, screen_w + 0.08, body_h + 0.08,
+            color=ACCENT, lw=1.0, zorder=6, round_pad=0.010)
 
-    by = col_y + 0.50
-    _text(ax, fx(cx), fy(by), "RAG accuracy delta",
-          size=11, weight="bold", color=GOOD)
-    _text(ax, fx(cx), fy(by + 0.25),
-          "+70 pp gain on 20 held-out questions\n"
-          "McNemar p = 0.0005",
-          size=10, color=SLATE)
+    # Crop the screenshot to drop the empty left "About" sidebar (~22%) and the
+    # very bottom rows (~5%) so the gap card + recommended targets dominate.
+    _image(ax, SHOTS / "03_top_gap_card_with_candidates.png",
+           x_in=screen_x, y_in=body_y, w_in=screen_w, h_in=body_h,
+           preserve_aspect=True, zorder=7,
+           crop_box=(0.21, 0.03, 1.00, 0.78))
+    _text(ax, fx(screen_x + 0.05), fy(body_y + body_h + 0.30),
+          "Live Gap Filler output — gap diagnosis + 3 recommended targets + pricing comparables",
+          size=9, color=GRAY, style="italic")
 
-    _text(ax, fx(cx), fy(by + 0.75), "Player-matcher precision@10",
-          size=11, weight="bold", color=GOOD)
-    _text(ax, fx(cx), fy(by + 1.00),
-          "41.9% vs 13.3% random (3.1× lift, n=43)\n"
-          "z = 5.66, p < 0.0001 — top-K finds actual signings",
-          size=10, color=SLATE)
+    # ─── RIGHT COLUMN: three short blocks ──────────────────────────────
+    col_top = body_y + 0.05
+    # Block 1 — three tabs
+    _text(ax, fx(techcol_x), fy(col_top),
+          "THREE WORKFLOWS", size=10.5, weight="bold", color=ACCENT)
+    _text(ax, fx(techcol_x), fy(col_top + 0.25),
+          "• Roster Builder — day-to-day lineup",
+          size=9.5, color=SLATE)
+    _text(ax, fx(techcol_x), fy(col_top + 0.46),
+          "• Opponent Scouting — threats + plan",
+          size=9.5, color=SLATE)
+    _text(ax, fx(techcol_x), fy(col_top + 0.67),
+          "• Gap Filler — diagnosis + RAG targets",
+          size=9.5, color=SLATE)
 
-    _text(ax, fx(cx), fy(by + 1.50), "Position-level diagnostic",
-          size=11, weight="bold", color=GOOD)
-    _text(ax, fx(cx), fy(by + 1.75),
-          "Flagged position underperforms 59.9% overall\n"
-          "(p=0.012)  ·  2B 74.2% (p=0.011)",
-          size=10, color=SLATE)
+    # Block 2 — data + LLM stack
+    _text(ax, fx(techcol_x), fy(col_top + 1.00),
+          "DATA + LLM STACK", size=10.5, weight="bold", color=ACCENT)
+    _text(ax, fx(techcol_x), fy(col_top + 1.25),
+          "pybaseball · Spotrac · Statcast",
+          size=9.5, color=SLATE)
+    _text(ax, fx(techcol_x), fy(col_top + 1.46),
+          "gpt-4o + 4o-mini · text-embed-3",
+          size=9.5, color=SLATE)
+    _text(ax, fx(techcol_x), fy(col_top + 1.67),
+          "ChromaDB RAG (999 players)",
+          size=9.5, color=SLATE)
 
-    _text(ax, fx(cx), fy(by + 2.25), "Honest null reported",
-          size=11, weight="bold", color=NEUTRAL)
-    _text(ax, fx(cx), fy(by + 2.50),
-          "Gap_score does NOT predict next-year wins —\n"
-          "loses to autocorrelation ~5×. Five independent\n"
-          "tests confirm. Reported plainly, not dressed up.",
-          size=10, color=SLATE)
+    # Block 3 — build economics
+    _text(ax, fx(techcol_x), fy(col_top + 2.00),
+          "BUILD ECONOMICS", size=10.5, weight="bold", color=ACCENT)
+    _text(ax, fx(techcol_x), fy(col_top + 2.25),
+          "9-day build  ·  ~$47 platform spend",
+          size=9.5, color=SLATE)
 
-    _hline(ax, fx(cx), fy(by + 3.30) - 0.004, fw(col_w), NAVY, lw=2)
-    _text(ax, fx(cx), fy(by + 3.42),
-          "Sabercast is a diagnostic + retrieval tool,",
+    # ─── HONEST-FRAMING LINE ───────────────────────────────────────────
+    framing_y = 6.15
+    _hline(ax, 0.75, framing_y, 11.85, NAVY, lw=1.5)
+    _text(ax, fx(0.75), fy(framing_y + 0.22),
+          "Diagnostic + retrieval tool — NOT a wins forecaster.",
           size=12, weight="bold", color=NAVY)
-    _text(ax, fx(cx), fy(by + 3.66),
-          "NOT a wins forecaster.",
-          size=12, weight="bold", color=NAVY)
+    _text(ax, fx(12.60), fy(framing_y + 0.22),
+          "Five wins-prediction nulls reported plainly.",
+          size=10, color=GRAY, ha="right", style="italic")
 
-    # ── Footer ────────────────────────────────────────────────────────────
-    _hline(ax, fx(0.5), fy(6.7), fw(12.333), ACCENT, lw=2)
-    _text(ax, fx(0.5), fy(6.85),
+    # ─── FOOTER: Powered-by logo strip (own row) ──────────────────────
+    _logo_strip(ax, y_in=6.70, logo_h=0.40)
+
+    # ─── URL strip (own row at the very bottom) ───────────────────────
+    url_y = 7.25
+    _hline(ax, 0.75, url_y - 0.10, 11.85, GRAY, lw=0.6)
+    _text(ax, fx(0.75), fy(url_y),
           "Live  ·  sabercast-mlb.streamlit.app",
-          size=12, weight="bold", color=NAVY)
-    _text(ax, fx(0.5 + 12.333), fy(6.85),
-          "Source · github.com/rwpeugh/sabercast",
-          size=12, weight="bold", color=NAVY, ha="right")
-    _text(ax, fx(0.5), fy(7.18),
-          "MKTG 569 · Building Business Applications of LLMs and Generative Models · Spring 2026",
-          size=9, color=GRAY)
+          size=10, weight="bold", color=NAVY, va="center")
+    _text(ax, fx(PW / 2), fy(url_y),
+          "MKTG 569  ·  Spring 2026",
+          size=9, color=GRAY, ha="center", va="center", style="italic")
+    _text(ax, fx(12.60), fy(url_y),
+          "github.com/rwpeugh/sabercast",
+          size=10, weight="bold", color=NAVY, ha="right", va="center")
 
     plt.tight_layout(pad=0)
-    plt.savefig(OUT_PATH, dpi=150, bbox_inches="tight", facecolor="white")
+    plt.savefig(OUT_PATH, dpi=150, bbox_inches="tight", facecolor=CREAM)
     plt.close()
     print(f"saved {OUT_PATH}")
     print(f"size: {OUT_PATH.stat().st_size / 1024:.1f} KB")

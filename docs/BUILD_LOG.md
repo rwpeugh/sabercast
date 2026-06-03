@@ -834,3 +834,38 @@ This is honest, defensible, and bounds the claims to what the data actually supp
 - `demo/smoke_test_edge_cases.py` — Test 8 regression invariant
 
 ---
+
+---
+
+## Entry 20 — June 3 (Polish): Image-rich pitch slide redesign
+
+**Trigger.** Pitch slide was text-heavy across three columns (WHAT / HOW / RESULTS). Hard to scan in the few seconds judges spend on a pitch deck before deciding whether to engage.
+
+**Redesign.** Replaced the 3-column wall-of-text with a layered visual layout:
+
+1. **Title block** — "Sabercast" + 2-line tagline + accent rule.
+2. **Hero stat band** — 4 big-number cards across the full width: `+70pp` (RAG accuracy), `3.1×` (precision@10 lift), `59.9%` (position hit-rate), `4 / 10` (significant findings honestly framed). Three green, one amber for the null. Judges' eyes land here in <1 second.
+3. **Main body** — real product screenshot (Gap Filler card with recommended targets) on the left in a navy-bordered frame; concise THREE WORKFLOWS / DATA + LLM STACK / BUILD ECONOMICS bullets on the right.
+4. **Honest-framing line** — "Diagnostic + retrieval tool — NOT a wins forecaster" on the left; "Five wins-prediction nulls reported plainly" on the right.
+5. **Powered-by logo strip** — OpenAI, Together AI, ChromaDB, Streamlit, Baseball Reference. Instant credibility signal without prose.
+6. **URL strip** — live URL + course attribution + GitHub source.
+7. **Theme accents** — vertical baseball-seam strand down the left edge (cropped from a stock seams image to avoid its pngtree watermark); baseball-diamond watermark at 7% opacity behind the upper-right title corner; cream background instead of pure white for warmth.
+
+**Asset preprocessing** (`demo/prep_pitch_assets.py`):
+- Converted the ChromaDB Windows icon (`.ico`) into a clean 256x256 PNG, picking the largest embedded resolution.
+- Cropped the stock seams image to its leftmost vertical strand only — the curved seams on the right were covered by a "pngtree" watermark and unusable.
+- Transcoded the diamond watermark from its WEBP-encoded `.jpg` (python-pptx rejects WEBP) into a proper PNG with alpha.
+
+**Layout mirroring.** The PNG renderer (`render_pitch_slide_png.py`) and the PPTX generator (`generate_pitch_slide.py`) now both produce the same visual layout — same coords, same colour palette, same elements. The PNG is the canonical preview; the PPTX stays editable for last-minute tweaks in PowerPoint.
+
+**Files touched:**
+- `demo/prep_pitch_assets.py` — NEW preprocessing script
+- `demo/render_pitch_slide_png.py` — full rewrite, image-rich layout
+- `demo/generate_pitch_slide.py` — full rewrite, mirrors PNG layout
+- `docs/demo/logos/` — vendor logos + baseball accents (user-provided + preprocessed)
+- `docs/demo/Sabercast_Pitch_Slide.png` — regenerated
+- `docs/demo/Sabercast_Pitch_Slide.pptx` — regenerated
+
+**What I left alone.** The Gap Filler screenshot used on the slide (`docs/checkpoint3/03_top_gap_card_with_candidates.png`) was captured pre-Entry-19 dedup fix, so it visibly contains the overlap bug (Marcus Semien appearing in both targets and pricing comparables). At slide thumbnail size the names aren't readable, so the visual is fine for the pitch — but a future polish pass should regenerate this screenshot post-dedup.
+
+---
