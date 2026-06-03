@@ -705,6 +705,66 @@ This is honest, defensible, and bounds the claims to what the data actually supp
 
 ---
 
+## Entry 17 — June 2 (Final polish): Shared-city team-filter bug + full eval refresh
+
+**Goal.** A real user-reported bug surfaced while exploring the deployed app: running Roster Builder for CHC vs MIL listed Andrew Vaughn as a Cubs first baseman. Vaughn was on the White Sox in 2024. The fix needs to land in code AND the published evaluation numbers need to be honest about the bias the bug introduced.
+
+**Root cause.** Three MLB cities host two teams each — Chicago (CHC/CWS), Los Angeles (LAD/LAA), New York (NYM/NYY). `TEAM_ABBR_TO_BREF` mapped all six abbreviations to just the city name. `_filter_team` did a substring match on the bref `Tm` column, returning BOTH city-mates' players. Vaughn (`Tm='Chicago'`) got pulled into CHC queries silently.
+
+**Fix.** `_filter_team` now accepts an optional `league` parameter ("AL" / "NL"). When provided, it also filters on the bref `Lev` column ("Maj-AL" / "Maj-NL"). Added `TEAM_ABBR_TO_LEAGUE` constant. All three public orchestrator entry points (`run_gap_filler_simple`, `run_roster_builder_simple`, `run_opponent_scouting_simple`) plus `eval/correlation_study.py` now pass team-league through to the filter. Inter-league mid-season traded players (`Lev='Maj-AL,Maj-NL'`, ~6 in 2024) match for both leagues — they did genuinely play in both, so this is correct.
+
+**Verification.**
+- Added `demo/smoke_test_edge_cases.py` Test 7: a regression check that asserts Vaughn is NOT in CHC's `team_hitters` after the fix. Green.
+- Built `demo/verify_chc_cws_fix.py`: Playwright-drives the deployed app through CHC vs MIL on Roster Builder, scans rendered output for "Vaughn". First poll caught it green at 35 seconds — Streamlit Cloud's auto-redeploy picked up the fix this time (no manual reboot needed).
+
+**Full eval refresh.** The bug affected ~36 of 180 (year, team) rows in `correlation_table.csv` (the 6 shared-city teams × 6 years). I cleared the cache for those keys (their deltas changed, so the SHA1 cache keys differ from old → fresh LLM calls) and re-ran the full evaluation pipeline:
+
+1. `correlation_study.py` — 36 fresh `gpt-4o` gap diagnostics, 144 cache hits. ~5 min, ~$0.30.
+2. `statistical_validation.py` — pure stats, no LLM.
+3. `wins_predictor.py` — pure stats, bWAR-based regression.
+4. `gap_fill_test.py` — pure stats.
+5. `methodology_ablation.py` — Lever 1 + Lever 2 ablations, pure stats.
+6. `generate_report_charts.py` — regenerated the two PNGs (RAG accuracy + position hit-rate).
+
+**How the numbers shifted (most consequential changes):**
+
+| Metric | Before fix | After fix | Direction |
+|---|---:|---:|---|
+| Legacy gap_score pooled r (n=180) | −0.058 | **−0.103** | stronger magnitude (~78%) |
+| Sabercast \|r\| in baseline shootout (excl. COVID) | 0.074 | 0.110 | still loses to last-year-wins r=+0.573 |
+| Overall position hit-rate | 62.8% (p=…) | 59.9% (**p=0.012**) | still significant overall |
+| 2B hit-rate | 71.9% (p=0.020) | **74.2% (p=0.011)** | MORE significant |
+| LF hit-rate | 75.0% (p=0.041) | 71.4% (p=0.078) | **demoted from significant to trending** |
+| SP hit-rate | 81.8% (p=0.065) | 56.3% (n.s.) | dropped after n grew 11→16 |
+| Wins predictor ΔR² | +0.0008 | +0.0056 | bigger but still p=0.31 |
+| Lever 2 Pearson(log AAV) | +0.103 | +0.120 | similar, still n.s. |
+
+**What verdicts did NOT change.** Five of six pre-registered verdicts hold:
+- 6.3.1 still underpowered
+- 6.3.2 still NO (gap_score loses to autocorrelation)
+- 6.3.3 still YES at the overall level (now with refreshed p=0.012)
+- 6.3.4, 6.3.5 still qualitative null
+- 6.3.6 still not significant at n=25
+- RAG eval unchanged (not affected by team filter)
+
+**What did change in framing.** The pre-fix report claimed "two positions reach statistical significance" (2B p=0.020, LF p=0.041). The refreshed evidence is more nuanced: **one position significant (2B at p=0.011, actually stronger than before), one trending (LF at p=0.078). The overall hit-rate test is still statistically significant at p=0.012.** Both updated reports (EVALUATION.md and SABERCAST_FINAL_REPORT.md) carry the refreshed numbers with a footnote documenting the bug-fix re-run.
+
+**Why I ran the full refresh instead of just patching the code.** The pre-fix `correlation_table.csv` carried a small bias on 36 of 180 rows (the team-aggregate stats mixed in city-mate players). Downstream analyses inherited that bias. Re-running cost ~$0.30 in fresh LLM calls and ~10 minutes of cascade time; not running it would have left the published report misaligned with the deployed code. The honest move is to refresh, accept that the headline LF claim softens, and report it plainly.
+
+**Updated artifacts:**
+- `core/orchestrator.py` — `_filter_team` + `TEAM_ABBR_TO_LEAGUE`
+- `eval/correlation_study.py` — passes team_league
+- `demo/smoke_test_edge_cases.py` — added Test 7 regression check
+- `demo/verify_chc_cws_fix.py` — Playwright check against deployed app
+- All 9 eval result CSVs in `eval/results/` — refreshed
+- `eval/results/correlation_scatter.png`, `correlation_by_year.png`, `rag_accuracy_by_category.png`, `gap_position_hit_rate.png` — regenerated
+- `docs/final_report/EVALUATION.md` + `SABERCAST_FINAL_REPORT.md` — refreshed numbers + footnote
+- `README.md` — refreshed eval headline
+- `docs/demo/Sabercast_Pitch_Slide.pptx` + `.png` — refreshed result callouts
+- All three Word docs regenerated
+
+---
+
 
 
 

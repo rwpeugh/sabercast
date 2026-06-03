@@ -1,5 +1,5 @@
 metric,n_all,r_all,n_no2020,r_no2020
-legacy gap_score (headline),180,-0.092,150,-0.053
-offense-only composite,180,-0.075,150,-0.028
-defense-only composite,180,-0.016,150,0.011
-combined offense+defense composite,180,-0.052,150,-0.005
+legacy gap_score (headline),180,-0.103,150,-0.073
+offense-only composite,180,-0.068,150,-0.027
+defense-only composite,180,-0.012,150,0.019
+combined offense+defense composite,180,-0.046,150,0.001

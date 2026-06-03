@@ -17,7 +17,7 @@ Sabercast is an LLM-powered MLB front-office intelligence platform built for sma
 
 The build wove together six distinct data sources (Baseball Reference batting/pitching via pybaseball, Spotrac contracts, Statcast Outs-Above-Average and sprint speed, Statcast catcher pop time, B-R team standings, B-R bWAR archives) plus four LLM-driven layers (`gpt-4o` for narrative reasoning, `gpt-4o-mini` for structured pricing and forecasts, `text-embedding-3-small` for RAG retrieval, and a Together-hosted fine-tuned `Qwen 2.5 7B` for contract valuation eval). The pipeline absorbed three mid-build LLM-platform constraints (OpenAI deprecating self-serve fine-tuning, Together moving small models off the serverless tier, Together flagging custom fine-tunes as non-serverless) and shipped a deployed application with a quantitatively-validated retrieval layer.
 
-**Evaluation headline:** RAG produces a **+70 percentage-point accuracy gain** over no-retrieval gpt-4o on a 20-question held-out test set (McNemar p = 0.0005). The position-level gap diagnostic identifies positions that underperform next year at **71.9% precision for 2B (p = 0.02)** and **75.0% for LF (p = 0.04)**. We pre-registered six additional statistical tests; five came back null on the wins-prediction question, and we report all of them honestly. Sabercast is a diagnostic and retrieval tool, not a wins forecaster — and the evaluation confirms that framing rather than dressing it up.
+**Evaluation headline:** RAG produces a **+70 percentage-point accuracy gain** over no-retrieval gpt-4o on a 20-question held-out test set (McNemar p = 0.0005). The position-level gap diagnostic flags positions that actually underperform league average the next year at **59.9% overall precision (p = 0.012)**, with **2B specifically at 74.2% (p = 0.011)** and **LF trending at 71.4% (p = 0.078)**. We pre-registered six additional statistical tests; five came back null on the wins-prediction question, and we report all of them honestly. Sabercast is a diagnostic and retrieval tool, not a wins forecaster — and the evaluation confirms that framing rather than dressing it up.
 
 ---
 
@@ -106,14 +106,14 @@ Per the professor's Checkpoint 3 feedback, evaluation accounts for 15% of the fi
 
 | # | Test | Result | Significant? |
 |---|---|---|---|
-| 1 | Gap_score → next-year wins (correlation) | r = −0.058, n=180 | NO (underpowered) |
-| 2 | **Baseline shootout** | Sabercast \|r\|=0.07 vs last-year-wins \|r\|=0.57 | **NO — gap_score is a diagnostic** |
-| 3 | **Position-level OAA hit-rate** | 71.9% at 2B, 75.0% at LF | **YES (2 positions)** |
+| 1 | Gap_score → next-year wins (correlation) | r = −0.103, n=180 | NO (underpowered, p=0.17) |
+| 2 | **Baseline shootout** | Sabercast \|r\|=0.11 vs last-year-wins \|r\|=0.57 | **NO — gap_score is a diagnostic** |
+| 3 | **Position-level OAA hit-rate** | 59.9% overall (p=0.012); 2B 74.2% (p=0.011); LF trending 71.4% (p=0.078) | **YES — overall + 2B; LF trending** |
 | 4 | Contract MAE significance | Ex-Ohtani Δ +$0.58M | NO (n=25, p=0.48) |
-| 5 | Wins predictor — incremental R² | ΔR² = +0.0008 | NO (p=0.70) |
+| 5 | Wins predictor — incremental R² | ΔR² = +0.0056 | NO (p=0.31) |
 | 6 | Gap-fill (binary) | +2.80 wins favoring filled | NO (p=0.39) |
 | 7 | Lever 1 — drop scarcity weights | Δ\|r\| = +0.029 | NO |
-| 8 | Lever 2 — continuous gap-fill | Pearson(log AAV) = +0.103 | NO (p=0.26) |
+| 8 | Lever 2 — continuous gap-fill | Pearson(log AAV) = +0.120 | NO (p=0.20) |
 | 9 | **RAG accuracy delta** | +70 pp gain (15% → 85%) | **YES (McNemar p=0.0005)** |
 
 Two cleanly significant findings, both supporting the same story: **Sabercast's value is in the diagnostic and retrieval layers, not in team-level wins forecasting.**
@@ -122,7 +122,7 @@ Two cleanly significant findings, both supporting the same story: **Sabercast's 
 
 For 180 (year, team) team-years (30 MLB teams × 2019–2024), Sabercast aggregated 17 batting + pitching + defensive dimensions, called gpt-4o to rank top gaps, and produced a composite team gap_score. We tested whether that score predicts wins in year Y+1.
 
-**Pooled Pearson r = −0.058** (n=180). Bootstrap 95% CI [−0.21, +0.09] — crosses zero. The minimum |r| detectable at α=0.05, power=0.80, n=180 is 0.21; our observed magnitude is below that threshold, so **the test is underpowered**. The four ablation variants (offense-only, defense-only, combined, legacy) all return weakly-negative correlations that don't statistically separate from zero.
+**Pooled Pearson r = −0.103** (n=180). Bootstrap 95% CI [−0.25, +0.04] — crosses zero. The minimum |r| detectable at α=0.05, power=0.80, n=180 is 0.21; our observed magnitude is below that threshold, so **the test is underpowered**. The four ablation variants (offense-only, defense-only, combined, legacy) all return weakly-negative correlations that don't statistically separate from zero.
 
 The honest framing: gap_score has the expected sign across every variant tested, but team-level wins are so noisy (downstream of injuries, pitcher rotation luck, schedule strength, midseason trades) that the diagnostic-to-wins signal is overwhelmed.
 
@@ -135,9 +135,9 @@ We compared gap_score against three baselines on the same 120 team-years (COVID-
 | Last-year wins (autocorrelation) | **+0.573** | < 0.0001 |
 | 3-year rolling mean wins | +0.341 | 0.0001 |
 | Random shuffle null | +0.040 | 0.66 |
-| Sabercast legacy gap_score | −0.074 | 0.42 |
+| Sabercast legacy gap_score | −0.110 | 0.23 |
 
-Sabercast's gap_score **loses to a thirty-line autocorrelation predictor by an 8× magnitude factor**. We tested whether adding gap_score to a kitchen-sink box-score regression (last-year wins + Pythagorean expectation + team bWAR + roster age) improves R² incrementally; the answer is no (ΔR² = +0.0008, partial F-test p = 0.70).
+Sabercast's gap_score **loses to a thirty-line autocorrelation predictor by a ~5× magnitude factor**. We tested whether adding gap_score to a kitchen-sink box-score regression (last-year wins + Pythagorean expectation + team bWAR + roster age) improves R² incrementally; the answer is no (ΔR² = +0.0056, partial F-test p = 0.31).
 
 **Verdict from these two tests:** gap_score is not a wins forecaster. The Sabercast diagnostic is **re-describing information already in the box scores** rather than extracting novel quantitative signal at the team-aggregate level.
 
@@ -147,12 +147,18 @@ The team-aggregate gap_score isn't predictive of wins, but Sabercast's **individ
 
 **Top-1 flagged position underperforms next year above chance at:**
 
-- **2B: 71.9% precision (binomial p = 0.020, n = 32)**
-- **LF: 75.0% precision (binomial p = 0.041, n = 20)**
-- SP: 81.8% precision (n = 11, trending p = 0.065)
-- Overall (172 measurable events): 62.8% precision vs 50% random baseline
+- **Overall: 59.9% precision (binomial p = 0.012, n = 172)**
+- **2B: 74.2% precision (binomial p = 0.011, n = 31)**
+- LF: 71.4% precision (trending, p = 0.078, n = 21)
+- SS: 63.9% (n = 36, p = 0.13)
+- SP: 56.3% (n = 16, p = 0.80)
+- 3B: 55.6% (n = 18, p = 0.81)
+- CF: 53.8% (n = 13, p = 1.00)
+- 1B: 45.0% (n = 20, p = 0.82)
+- RF: 43.8% (n = 16, p = 0.80)
+- C: 0% (n = 1, too few)
 
-Two positions reach statistical significance. This is the strongest evidence of diagnostic validity: when Sabercast surfaces a 2B or LF gap, the team's actual production at that position the following year is significantly more likely to be below league average than chance.
+**The overall hit-rate is significantly above chance**, with 2B specifically reaching p < 0.05 and LF trending toward it. This is the strongest evidence of diagnostic validity: across 172 (year, team) events, the top-1 flagged position is genuinely below league average the following year about 60% of the time. The signal is strongest at 2B, where it reaches statistical significance, and trending positive at LF.
 
 ![Figure 2. Position-level diagnostic precision. Each bar is the percentage of (year, team) cases where Sabercast's top-1 flagged position underperformed league average the following year. Green bars are statistically significant at p < 0.05; amber is trending p < 0.10; gray is not significant. The dashed line is the 50% random baseline.](../../eval/results/gap_position_hit_rate.png)
 

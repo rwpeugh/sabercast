@@ -159,8 +159,8 @@ def build_slide() -> None:
               "Position-level diagnostic validated",
               size=13, bold=True, color=GOOD)
     _add_text(slide, cx, block_y + 1.25, col_w, 0.55,
-              "Flagged top-1 position underperforms next year at\n"
-              "71.9% (2B, p=0.020) and 75.0% (LF, p=0.041)",
+              "Flagged top-1 position underperforms next year\n"
+              "59.9% overall (p=0.012)  ·  74.2% at 2B (p=0.011)",
               size=11.5, color=SLATE)
 
     _add_text(slide, cx, block_y + 1.90, col_w, 0.35,
@@ -168,7 +168,7 @@ def build_slide() -> None:
               size=13, bold=True, color=NEUTRAL)
     _add_text(slide, cx, block_y + 2.20, col_w, 0.85,
               "Gap_score does NOT predict next-year wins —\n"
-              "loses to last-year-wins autocorrelation by ~8×.\n"
+              "loses to last-year-wins autocorrelation by ~5×.\n"
               "Five independent tests confirm. Reported plainly,\n"
               "not dressed up.",
               size=11.5, color=SLATE)

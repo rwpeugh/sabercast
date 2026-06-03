@@ -35,7 +35,7 @@ Nine pre-registered independent tests across 4 evidence categories. **Two cleanl
 | Finding | Result | Significance |
 |---|---|---|
 | **RAG accuracy delta** | +70 percentage-point gain on 20-question held-out set (15% → 85%) | **McNemar p = 0.0005** |
-| **Position-level hit-rate** | When Sabercast flags 2B as a top gap, that team's 2B underperforms next year 71.9% of the time (LF: 75.0%) | **Binomial p = 0.020 (2B), p = 0.041 (LF)** |
+| **Position-level hit-rate** | When Sabercast flags a top-1 gap position, that team's production at that position is below league average the following year 59.9% of the time (172 events); 2B specifically at 74.2%, LF trending at 71.4% | **Binomial p = 0.012 overall; 2B p = 0.011; LF trending p = 0.078** |
 
 **Honest nulls** (5 tests confirm the same thing): Sabercast's team-aggregate gap score does NOT predict next-year wins. It loses to a one-line autocorrelation baseline (last-year wins r=+0.573 vs Sabercast r=−0.074, excl. COVID). The tool is a **diagnostic surface, not a wins forecaster** — and the evaluation confirms that framing rather than dressing it up.
 

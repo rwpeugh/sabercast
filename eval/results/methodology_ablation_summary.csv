@@ -1,3 +1,3 @@
 lever,result,verdict
-1. Drop positional scarcity weights,|r| weighted=0.092 vs unweighted=0.122 (Δ=+0.029),no meaningful change
-2. Continuous treatment (AAV at flagged position),Pearson(log AAV)=+0.103  Spearman=+0.061,continuous treatment still not significant — log-AAV r=+0.103 (p=0.264)
+1. Drop positional scarcity weights,|r| weighted=0.103 vs unweighted=0.135 (Δ=+0.032),no meaningful change
+2. Continuous treatment (AAV at flagged position),Pearson(log AAV)=+0.120  Spearman=+0.075,continuous treatment still not significant — log-AAV r=+0.120 (p=0.191)

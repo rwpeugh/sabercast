@@ -1,7 +1,7 @@
 year,team,top_gap_position,next_year,underperformed,note
 2019,ARI,RF,2020,True,team OAA -2.0 vs league -0.4
-2019,ATL,2B,2020,False,team OAA +2.5 vs league -0.1
-2019,BAL,SP,2020,True,team SP ERA 4.42 vs league 4.03
+2019,ATL,1B,2020,False,team OAA +1.0 vs league -0.6
+2019,BAL,SS,2020,True,team OAA +0.0 vs league +1.0
 2019,BOS,SS,2020,True,team OAA -3.0 vs league +1.0
 2019,CHC,LF,2020,True,team OAA -2.0 vs league -0.5
 2019,CIN,CF,2020,True,team OAA +0.0 vs league +1.4
@@ -10,8 +10,8 @@ year,team,top_gap_position,next_year,underperformed,note
 2019,CWS,LF,2020,True,team OAA -3.0 vs league -0.5
 2019,DET,RF,2020,False,team OAA +1.0 vs league -0.4
 2019,HOU,3B,2020,False,team OAA +1.0 vs league +0.6
-2019,KC,3B,2020,True,team OAA -1.0 vs league +0.6
-2019,LAA,CF,2020,True,team OAA -1.0 vs league +1.4
+2019,KC,SP,2020,True,team SP ERA 4.44 vs league 4.03
+2019,LAA,SP,2020,False,team SP ERA 3.30 vs league 4.03
 2019,LAD,CF,2020,False,team OAA +7.0 vs league +1.4
 2019,MIA,CF,2020,,team Marlins not in oaa pos=CF year=2020
 2019,MIL,2B,2020,True,team OAA -2.0 vs league -0.1
@@ -25,7 +25,7 @@ year,team,top_gap_position,next_year,underperformed,note
 2019,SEA,LF,2020,True,team OAA -2.0 vs league -0.5
 2019,SF,CF,2020,False,team OAA +3.0 vs league +1.4
 2019,STL,RF,2020,False,team OAA +0.0 vs league -0.4
-2019,TB,1B,2020,True,team OAA -3.0 vs league -0.6
+2019,TB,LF,2020,False,team OAA -0.5 vs league -0.5
 2019,TEX,LF,2020,True,team OAA -1.0 vs league -0.5
 2019,TOR,3B,2020,True,team OAA -2.0 vs league +0.6
 2019,WSH,2B,2020,True,team OAA -3.5 vs league -0.1
@@ -38,7 +38,7 @@ year,team,top_gap_position,next_year,underperformed,note
 2020,CLE,RF,2021,True,team OAA -1.0 vs league -0.4
 2020,COL,SP,2021,True,team SP ERA 4.47 vs league 4.40
 2020,CWS,LF,2021,True,team OAA -2.5 vs league -1.6
-2020,DET,3B,2021,True,team OAA +0.0 vs league +0.3
+2020,DET,SP,2021,False,team SP ERA 3.95 vs league 4.40
 2020,HOU,2B,2021,False,team OAA +2.0 vs league +1.4
 2020,KC,3B,2021,True,team OAA -8.0 vs league +0.3
 2020,LAA,RF,2021,False,team OAA +0.0 vs league -0.4
@@ -59,7 +59,7 @@ year,team,top_gap_position,next_year,underperformed,note
 2020,TEX,SS,2021,True,team OAA -6.0 vs league +0.8
 2020,TOR,SP,2021,False,team SP ERA 3.68 vs league 4.40
 2020,WSH,2B,2021,True,team OAA -6.0 vs league +1.4
-2021,ARI,CF,2022,False,team OAA +7.0 vs league +3.2
+2021,ARI,SP,2022,False,team SP ERA 3.60 vs league 4.08
 2021,ATL,3B,2022,True,team OAA -5.0 vs league +1.0
 2021,BAL,SP,2022,True,team SP ERA 4.18 vs league 4.08
 2021,BOS,3B,2022,True,team OAA -2.0 vs league +1.0
@@ -92,7 +92,7 @@ year,team,top_gap_position,next_year,underperformed,note
 2022,ARI,3B,2023,True,team OAA +1.0 vs league +1.7
 2022,ATL,RF,2023,True,team OAA -7.0 vs league -0.5
 2022,BAL,2B,2023,True,team OAA -7.5 vs league +0.8
-2022,BOS,1B,2023,True,team OAA -10.0 vs league -1.1
+2022,BOS,SP,2023,False,team SP ERA 4.11 vs league 4.47
 2022,CHC,3B,2023,False,team OAA +2.0 vs league +1.7
 2022,CIN,2B,2023,True,team OAA -6.0 vs league +0.8
 2022,CLE,SS,2023,,team Guardians not in oaa pos=SS year=2023
@@ -131,7 +131,7 @@ year,team,top_gap_position,next_year,underperformed,note
 2023,DET,1B,2024,False,team OAA +1.0 vs league -1.2
 2023,HOU,1B,2024,True,team OAA -7.0 vs league -1.2
 2023,KC,RF,2024,True,team OAA -5.0 vs league -1.1
-2023,LAA,SS,2024,True,team OAA -5.0 vs league +2.2
+2023,LAA,SP,2024,False,team SP ERA 4.18 vs league 4.18
 2023,LAD,2B,2024,True,team OAA -2.0 vs league +1.7
 2023,MIA,2B,2024,False,team OAA +16.0 vs league +1.7
 2023,MIL,C,2024,False,team pop 1.95s vs league 1.96s

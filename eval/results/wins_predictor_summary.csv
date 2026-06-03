@@ -1,2 +1,2 @@
 n_no_covid,baseline_r2_no_covid,extended_r2_no_covid,incremental_r2_no_covid,incremental_cv_r2_no_covid,gap_score_coef_no_covid,gap_score_pvalue_no_covid,partial_F_no_covid,partial_F_pvalue_no_covid,verdict
-120,0.3839,0.3847,0.0008,-0.0038,-0.1234,0.696,0.1534,0.696,"NO — after controlling for last-year-wins, Pythagorean expectation, team WAR, and roster age, gap_score's incremental contribution is statistically zero. Sabercast is descriptive, not predictive at the wins level."
+120,0.3839,0.3894,0.0056,-0.004,-0.3272,0.31,1.0401,0.31,"NO — after controlling for last-year-wins, Pythagorean expectation, team WAR, and roster age, gap_score's incremental contribution is statistically zero. Sabercast is descriptive, not predictive at the wins level."

@@ -11,14 +11,14 @@
 
 | # | Test | What it measures | Result | Significant? |
 |---|---|---|---|---|
-| 1 | Pooled correlation: gap_score → next-year wins | Does the diagnostic score predict team-level wins? | r = −0.058 (n=180) | NO (p=0.44, underpowered) |
-| 2 | **Baseline shootout** | Does Sabercast beat last-year-wins as a wins predictor? | Sabercast \|r\|=0.07 vs autocorrelation \|r\|=**0.57** (n=120 excl. COVID) | **NO — gap_score is a diagnostic, not a forecaster** |
-| 3 | **Position-level OAA hit-rate** | When Sabercast flags position P, does that team's defensive OAA at P underperform next year? | 62.8% overall; **71.9% at 2B** (p=0.020); **75.0% at LF** (p=0.041) | **YES (2 positions)** |
+| 1 | Pooled correlation: gap_score → next-year wins | Does the diagnostic score predict team-level wins? | r = −0.103 (n=180) | NO (p=0.17, underpowered) |
+| 2 | **Baseline shootout** | Does Sabercast beat last-year-wins as a wins predictor? | Sabercast \|r\|=0.11 vs autocorrelation \|r\|=**0.57** (n=120 excl. COVID) | **NO — gap_score is a diagnostic, not a forecaster** |
+| 3 | **Position-level OAA hit-rate** | When Sabercast flags position P, does that team's defensive OAA at P underperform next year? | **59.9% overall (p=0.012, n=172)**; **2B 74.2% (p=0.011)**; LF trending 71.4% (p=0.078) | **YES — overall + 2B; LF trending** |
 | 4 | Contract MAE significance | Is the Qwen-7B fine-tune meaningfully better than the gpt-4o-mini baseline? | Ex-Ohtani Δ = +$0.58M; 95% CI [−$0.35M, +$1.52M] | NO (n=25, p=0.48) |
-| 5 | Wins predictor — incremental R² | Does gap_score add information beyond box-score features (Pythagorean, team WAR, age, last-year wins)? | ΔR² = +0.0008; partial F=0.15 | NO (p=0.70) |
+| 5 | Wins predictor — incremental R² | Does gap_score add information beyond box-score features (Pythagorean, team WAR, age, last-year wins)? | ΔR² = +0.0056; partial F=1.04 | NO (p=0.31) |
 | 6 | Gap-fill (binary) | Do teams that filled their flagged top-1 gap win more next year? | Filled mean Δwins = +1.90; unfilled = −0.90 (diff +2.80) | NO (Mann-Whitney p=0.39) |
 | 7 | Lever 1 — drop positional scarcity weights | Are the heuristic scarcity multipliers (C/SS=1.4, DH=0.7, …) helping or adding noise? | Unweighted ΔR² over weighted: +0.029 in \|r\| | NO meaningful change |
-| 8 | Lever 2 — continuous gap-fill treatment | Does AAV invested at the flagged position correlate with wins improvement? | Pearson(log AAV, Δwins) = +0.103 | NO (p=0.26) |
+| 8 | Lever 2 — continuous gap-fill treatment | Does AAV invested at the flagged position correlate with wins improvement? | Pearson(log AAV, Δwins) = +0.120 | NO (p=0.20) |
 | 9 | **RAG accuracy delta** | Does ChromaDB retrieval improve gpt-4o's answer accuracy on player-profile queries? | +70 percentage-point gain (15% → 85% over 20 questions) | **YES (McNemar p=0.0005)** |
 
 **Two clean significant findings, both supporting the same story:** Sabercast's value is in the diagnostic and retrieval layers, not in team-level wins forecasting. We tested wins-forecasting honestly via multiple paths (tests 1, 2, 5, 6, 7, 8) and report the null finding plainly.
@@ -35,10 +35,10 @@
 
 | Predictor | n=180 (all years) | n=150 (excl. 2020) |
 |---|---|---|
-| Legacy gap_score (headline) | r = −0.058 | r = −0.014 |
-| Offense-only composite | r = −0.090 | r = −0.090 |
-| Defense-only composite | r = −0.033 | r = −0.009 |
-| Combined offense + defense | r = −0.074 | r = −0.053 |
+| Legacy gap_score (headline) | r = −0.103 | r = −0.073 |
+| Offense-only composite | r = −0.068 | r = −0.027 |
+| Defense-only composite | r = −0.012 | r = +0.019 |
+| Combined offense + defense | r = −0.046 | r = +0.001 |
 
 **Bootstrap 95% CIs** all cross zero (`eval/results/correlation_significance.csv`). Power floor: with n=180 we'd need \|r\| ≥ 0.21 to detect at α=0.05 / power=0.80. Our observed magnitudes are well below that threshold — **the test is underpowered**, and we report that openly rather than dressing it up.
 
@@ -124,30 +124,32 @@ With COVID-affected rows excluded (n=120, fair scale comparison):
 | A. Last-year wins (autocorrelation) | **+0.573** | [+0.45, +0.67] | **< 0.0001** |
 | B. 3-year rolling mean | +0.341 | [+0.20, +0.48] | 0.0001 |
 | C. Random shuffle null | +0.040 | [−0.17, +0.24] | 0.66 |
-| Sabercast legacy gap_score | −0.074 | [−0.24, +0.08] | 0.42 |
-| Sabercast offense-only | +0.003 | [−0.19, +0.19] | 0.98 |
-| Sabercast defense-only | −0.005 | [−0.22, +0.23] | 0.95 |
-| Sabercast combined off+def | −0.003 | [−0.21, +0.21] | 0.98 |
+| Sabercast legacy gap_score | −0.110 | [−0.27, +0.05] | 0.23 |
+| Sabercast offense-only | −0.073 | [−0.25, +0.11] | 0.43 |
+| Sabercast defense-only | +0.102 | [−0.07, +0.27] | 0.27 |
+| Sabercast combined off+def | +0.041 | [−0.14, +0.21] | 0.66 |
 
-**Sabercast loses to last-year-wins by ~8× in correlation magnitude.** This is the most important single test in the suite. Verdict: **gap_score is a diagnostic surface, not a wins forecaster.**
+**Sabercast loses to last-year-wins by ~5× in correlation magnitude.** This is the most important single test in the suite. Verdict: **gap_score is a diagnostic surface, not a wins forecaster.**
 
 ### B.3 — Top-1 gap-position hit-rate (test 6.3.3)
 For each (year, team, top_gap_position) triple, look up next-year defensive performance at that position. Binary outcome: did that team underperform league average at the flagged position the following year? (For 1B/2B/3B/SS/LF/CF/RF: OAA. For SP/RP: top-3 by IP, mean ERA vs league. For C: pop time to 2B.)
 
 | Position | n | Precision | Random baseline | Binomial p |
 |---|---:|---:|---:|---:|
-| **2B** | 32 | **71.9%** | 50% | **0.020** |
-| **LF** | 20 | **75.0%** | 50% | **0.041** |
-| SP | 11 | 81.8% | 50% | 0.065 |
+| **2B** | 31 | **74.2%** | 50% | **0.011** |
+| LF | 21 | 71.4% | 50% | 0.078 (trending) |
 | SS | 36 | 63.9% | 50% | 0.132 |
-| 3B | 20 | 60.0% | 50% | 0.503 |
-| 1B | 21 | 52.4% | 50% | 1.000 |
-| CF | 15 | 53.3% | 50% | 1.000 |
+| SP | 16 | 56.3% | 50% | 0.804 |
+| 3B | 18 | 55.6% | 50% | 0.815 |
+| CF | 13 | 53.8% | 50% | 1.000 |
+| 1B | 20 | 45.0% | 50% | 0.824 |
 | RF | 16 | 43.8% | 50% | 0.804 |
 | C | 1 | 0% | 50% | (too few) |
-| **Overall** | **172** | **62.8%** | 50% | — |
+| **Overall** | **172** | **59.9%** | 50% | **0.012** |
 
-**Verdict: significant for 2B and LF.** When Sabercast flags second base or left field as a team's top gap, that team's next-year defensive performance at that position is below league average **significantly above chance.** SP trends to 82% precision but underpowered.
+**Verdict: overall hit-rate is significantly above chance (p=0.012). 2B specifically reaches significance (p=0.011); LF trends positive (p=0.078) but no longer reaches p<0.05 after the shared-city team-filter bug-fix re-run (see footnote).** When Sabercast flags second base as a team's top gap, that team's next-year defensive OAA at 2B is below league average significantly above chance. The overall 60% hit-rate across 172 events confirms the diagnostic is producing real signal at the position level.
+
+> **Footnote on the shared-city correction.** A bug in the team filter caused CHC/CWS, LAD/LAA, and NYM/NYY queries to share players (both teams mapped to the same bref city name). The fix discriminates by bref's `Lev` column (Maj-AL vs Maj-NL). Re-running the full eval pipeline shifted the 36 of 180 affected (year, team) rows. Most verdicts held; the LF hit-rate dropped from p=0.041 (significant) to p=0.078 (trending), and the headline correlation strengthened from r=−0.058 to r=−0.103. The overall 6.3.3 verdict ("flagged positions underperform above chance") remains statistically significant.
 
 ### B.4 — Market tier stratification (test 6.3.4)
 Within small (<$150M payroll, 11 teams), mid ($150–220M, 10 teams), and large (>$220M, 9 teams) markets, the correlation between gap_score and next-year wins is essentially the same (all r ≈ ±0.05, all CIs cross zero). **Business framing of "small/mid market tool" is not differentially validated by the data** — the tool works (or doesn't) similarly across tiers.
@@ -243,5 +245,5 @@ The Sabercast architecture absorbed **three distinct mid-build LLM-platform cons
 ## What the evaluation does claim
 
 - **RAG produces a statistically significant +70 percentage-point accuracy gain** on player-profile queries (McNemar p=0.0005). The retrieval-augmented architecture earns its keep.
-- **The gap diagnostic identifies positions that underperform next year** at second base (71.9% precision, p=0.02) and left field (75.0%, p=0.04). The flagging is meaningful signal at the position level even though it doesn't aggregate to wins-predictive power.
+- **The gap diagnostic identifies positions that underperform next year significantly above chance overall** (59.9% precision over 172 events, binomial p=0.012), with **second base specifically reaching p=0.011** and **left field trending at p=0.078**. The flagging is meaningful signal at the position level even though it doesn't aggregate to wins-predictive power.
 - **The fine-tune does improve infield contract valuation borderline-significantly** (IF MAE Δ = −$1.41M, CI [+$0.04M, +$2.89M]).
