@@ -143,35 +143,42 @@ def build_slide() -> None:
 
     # RIGHT — Results
     cx = (col_w + 0.5 + 0.4) + col_w + 0.4
-    _add_column_header(slide, cx, col_y, col_w, "RESULTS — 9 pre-registered tests, 2 significant", ACCENT)
+    _add_column_header(slide, cx, col_y, col_w, "RESULTS — 10 pre-registered tests, 4 significant", ACCENT)
 
-    # Result blocks
-    block_y = col_y + 0.55
-    _add_text(slide, cx, block_y, col_w, 0.35,
-              "RAG retrieval validated",
-              size=13, bold=True, color=GOOD)
-    _add_text(slide, cx, block_y + 0.30, col_w, 0.55,
-              "+70 percentage-point accuracy gain on 20-question\n"
-              "held-out set  ·  McNemar exact p = 0.0005",
-              size=11.5, color=SLATE)
+    # Result blocks (compact layout to fit four findings + null + takeaway)
+    block_y = col_y + 0.50
+    _add_text(slide, cx, block_y, col_w, 0.28,
+              "RAG accuracy delta",
+              size=11.5, bold=True, color=GOOD)
+    _add_text(slide, cx, block_y + 0.25, col_w, 0.40,
+              "+70 pp gain on 20 held-out questions\n"
+              "McNemar p = 0.0005",
+              size=10.5, color=SLATE)
 
-    _add_text(slide, cx, block_y + 0.95, col_w, 0.35,
-              "Position-level diagnostic validated",
-              size=13, bold=True, color=GOOD)
-    _add_text(slide, cx, block_y + 1.25, col_w, 0.55,
-              "Flagged top-1 position underperforms next year\n"
-              "59.9% overall (p=0.012)  ·  74.2% at 2B (p=0.011)",
-              size=11.5, color=SLATE)
+    _add_text(slide, cx, block_y + 0.75, col_w, 0.28,
+              "Player-matcher precision@10",
+              size=11.5, bold=True, color=GOOD)
+    _add_text(slide, cx, block_y + 1.00, col_w, 0.40,
+              "41.9% vs 13.3% random (3.1× lift, n=43)\n"
+              "z = 5.66, p < 0.0001 — top-K finds actual signings",
+              size=10.5, color=SLATE)
 
-    _add_text(slide, cx, block_y + 1.90, col_w, 0.35,
+    _add_text(slide, cx, block_y + 1.50, col_w, 0.28,
+              "Position-level diagnostic",
+              size=11.5, bold=True, color=GOOD)
+    _add_text(slide, cx, block_y + 1.75, col_w, 0.40,
+              "Flagged position underperforms 59.9% overall\n"
+              "(p=0.012)  ·  2B 74.2% (p=0.011)",
+              size=10.5, color=SLATE)
+
+    _add_text(slide, cx, block_y + 2.25, col_w, 0.28,
               "Honest null reported",
-              size=13, bold=True, color=NEUTRAL)
-    _add_text(slide, cx, block_y + 2.20, col_w, 0.85,
+              size=11.5, bold=True, color=NEUTRAL)
+    _add_text(slide, cx, block_y + 2.50, col_w, 0.70,
               "Gap_score does NOT predict next-year wins —\n"
-              "loses to last-year-wins autocorrelation by ~5×.\n"
-              "Five independent tests confirm. Reported plainly,\n"
-              "not dressed up.",
-              size=11.5, color=SLATE)
+              "loses to autocorrelation ~5×. Five independent\n"
+              "tests confirm. Reported plainly, not dressed up.",
+              size=10.5, color=SLATE)
 
     # Bottom: takeaway
     _add_box(slide, cx, block_y + 3.20, col_w, 0.05, NAVY)

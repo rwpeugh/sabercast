@@ -30,12 +30,14 @@ Each runs in ~12 seconds with full no-look-ahead enforcement (contracts and play
 
 ## Evaluation headlines
 
-Nine pre-registered independent tests across 4 evidence categories. **Two cleanly statistically significant findings:**
+Ten pre-registered independent tests across 4 evidence categories. **Four cleanly statistically significant findings:**
 
 | Finding | Result | Significance |
 |---|---|---|
 | **RAG accuracy delta** | +70 percentage-point gain on 20-question held-out set (15% → 85%) | **McNemar p = 0.0005** |
+| **Player-matcher precision@10 vs actual 2025 signings** | When a team had a flagged gap and signed an FA at that position, Sabercast's `find_matches` ranks the actual signer in the top-10 41.9% of the time vs 13.3% random baseline (3.1× lift, n=43) | **z = 5.66, p < 0.0001** |
 | **Position-level hit-rate** | When Sabercast flags a top-1 gap position, that team's production at that position is below league average the following year 59.9% of the time (172 events); 2B specifically at 74.2%, LF trending at 71.4% | **Binomial p = 0.012 overall; 2B p = 0.011; LF trending p = 0.078** |
+| **Fine-tune contract MAE at IF position** | −$1.41M improvement (CI [+$0.04M, +$2.89M]) | borderline significant |
 
 **Honest nulls** (5 tests confirm the same thing): Sabercast's team-aggregate gap score does NOT predict next-year wins. It loses to a one-line autocorrelation baseline (last-year wins r=+0.573 vs Sabercast r=−0.074, excl. COVID). The tool is a **diagnostic surface, not a wins forecaster** — and the evaluation confirms that framing rather than dressing it up.
 

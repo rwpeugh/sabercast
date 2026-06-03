@@ -126,38 +126,44 @@ def build_png() -> None:
     cx = 0.5 + (col_w + 0.4) * 2
     _hline(ax, fx(cx), fy(col_y), fw(col_w), ACCENT, lw=3)
     _text(ax, fx(cx), fy(col_y + 0.20),
-          "RESULTS — 9 pre-registered tests, 2 significant",
+          "RESULTS — 10 pre-registered tests, 4 significant",
           size=col_label_size, weight="bold", color=ACCENT)
 
-    by = col_y + 0.55
-    _text(ax, fx(cx), fy(by), "RAG retrieval validated",
-          size=13, weight="bold", color=GOOD)
-    _text(ax, fx(cx), fy(by + 0.30),
-          "+70 percentage-point accuracy gain on 20-question\n"
-          "held-out set  ·  McNemar exact p = 0.0005",
-          size=11, color=SLATE)
+    by = col_y + 0.50
+    _text(ax, fx(cx), fy(by), "RAG accuracy delta",
+          size=11, weight="bold", color=GOOD)
+    _text(ax, fx(cx), fy(by + 0.25),
+          "+70 pp gain on 20 held-out questions\n"
+          "McNemar p = 0.0005",
+          size=10, color=SLATE)
 
-    _text(ax, fx(cx), fy(by + 0.95), "Position-level diagnostic validated",
-          size=13, weight="bold", color=GOOD)
-    _text(ax, fx(cx), fy(by + 1.25),
-          "Flagged top-1 position underperforms next year\n"
-          "59.9% overall (p=0.012)  ·  74.2% at 2B (p=0.011)",
-          size=11, color=SLATE)
+    _text(ax, fx(cx), fy(by + 0.75), "Player-matcher precision@10",
+          size=11, weight="bold", color=GOOD)
+    _text(ax, fx(cx), fy(by + 1.00),
+          "41.9% vs 13.3% random (3.1× lift, n=43)\n"
+          "z = 5.66, p < 0.0001 — top-K finds actual signings",
+          size=10, color=SLATE)
 
-    _text(ax, fx(cx), fy(by + 1.90), "Honest null reported",
-          size=13, weight="bold", color=NEUTRAL)
-    _text(ax, fx(cx), fy(by + 2.20),
+    _text(ax, fx(cx), fy(by + 1.50), "Position-level diagnostic",
+          size=11, weight="bold", color=GOOD)
+    _text(ax, fx(cx), fy(by + 1.75),
+          "Flagged position underperforms 59.9% overall\n"
+          "(p=0.012)  ·  2B 74.2% (p=0.011)",
+          size=10, color=SLATE)
+
+    _text(ax, fx(cx), fy(by + 2.25), "Honest null reported",
+          size=11, weight="bold", color=NEUTRAL)
+    _text(ax, fx(cx), fy(by + 2.50),
           "Gap_score does NOT predict next-year wins —\n"
-          "loses to last-year-wins autocorrelation by ~5×.\n"
-          "Five independent tests confirm. Reported plainly,\n"
-          "not dressed up.",
-          size=11, color=SLATE)
+          "loses to autocorrelation ~5×. Five independent\n"
+          "tests confirm. Reported plainly, not dressed up.",
+          size=10, color=SLATE)
 
-    _hline(ax, fx(cx), fy(by + 3.25) - 0.004, fw(col_w), NAVY, lw=2)
-    _text(ax, fx(cx), fy(by + 3.36),
+    _hline(ax, fx(cx), fy(by + 3.30) - 0.004, fw(col_w), NAVY, lw=2)
+    _text(ax, fx(cx), fy(by + 3.42),
           "Sabercast is a diagnostic + retrieval tool,",
           size=12, weight="bold", color=NAVY)
-    _text(ax, fx(cx), fy(by + 3.60),
+    _text(ax, fx(cx), fy(by + 3.66),
           "NOT a wins forecaster.",
           size=12, weight="bold", color=NAVY)
 

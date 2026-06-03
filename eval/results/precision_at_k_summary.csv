@@ -1,0 +1,4 @@
+K,n_events,observed_hits,observed_precision,random_baseline_precision,lift,z_score,p_value_one_sided,significant_at_0_05
+3,43,4,0.093,0.04,2.32,1.786,0.0371,True
+5,43,7,0.1628,0.0667,2.44,2.557,0.0053,True
+10,43,18,0.4186,0.1334,3.14,5.655,0.0,True
