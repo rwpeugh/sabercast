@@ -918,3 +918,55 @@ Blocks 2-3 (DATA + LLM STACK, BUILD ECONOMICS) are unchanged — these stay for 
 - `docs/demo/Sabercast_Pitch_Slide.pptx` — regenerated
 
 ---
+
+---
+
+## Entry 22 — June 3 (Polish): Pitch slide reframed as pure GM-buyer pitch
+
+**Trigger.** Even after Entry 21's rebalance, the slide still leaned on stats/LLM jargon — "p=0.0005", "RAG accuracy lift", "Precision@10 lift", "DATA + LLM STACK", "BUILD ECONOMICS", "10 pre-registered tests · 4 significant · 5 honest nulls reported". Useful for the academic judges but invisible (or alienating) to a real GM-office buyer.
+
+**Rebalance.** Every visible callout now answers a question a GM would actually ask. Underlying numbers preserved; framing rewritten.
+
+**Hero band (every card reframed):**
+
+| GM question | Card |
+|---|---|
+| "Will it slow down my meeting?" | **`13 sec`** · Decisions in real time · *Use during trade calls, not after* |
+| "Will I trust the FA recommendations?" | **`3.1×`** · Better FA recommendations · *Top-10 surfaces players you'd consider* |
+| "Does it have enough data?" | **`1,254`** · FA contracts indexed · *Pricing context for every position* |
+| "Does it identify my real weak spots?" | **`60%`** · Validated gap diagnosis · *Up to 74% at specific positions* |
+
+**Right column (Blocks 2 + 3 reframed):**
+
+- "DATA + LLM STACK" → **"COMPLETE COVERAGE"** (All 30 MLB teams · 999 player profiles with Statcast · 5+ seasons of historical performance). Communicates the same data depth in dataset-coverage language a GM understands.
+- "BUILD ECONOMICS" → **"READY FOR YOUR WORKFLOW"** (Live web app · no install · try any team). Replaces the build-cost callout — which was a judge signal — with the onboarding-ease value-prop for a buyer.
+
+**Honest-framing line (both halves rewritten):**
+
+- Was: "Decision-support tool — not a wins forecaster." + "10 pre-registered tests · 4 significant · 5 honest nulls reported"
+- Now: "Decision support — augments your analysts, doesn't replace them." + "Every recommendation cites comparables · diagnosis shows its confidence"
+- The first half answers a real GM concern ("am I going to get fired by an algorithm?"); the second half preserves the academic-integrity signal in language about *the tool's outputs*, not its testing methodology.
+
+**Powered-by logos: kept.** OpenAI / Streamlit / ChromaDB / Together AI / Baseball Reference function as a trust signal a buyer recognizes (well-known vendors = credible foundations), not as LLM jargon. They earn their slot.
+
+**Course attribution: kept in tiny gray text at the bottom.** Innocuous; doesn't compete with the buyer message; preserves the academic record.
+
+**Net effect.** Reading the slide cold, a GM-office researcher gets a complete answer:
+
+1. *What does this do for me?* (tagline)
+2. *How fast?* (13 sec)
+3. *How reliable?* (3.1× better FA recs, 60% validated diagnosis)
+4. *How complete is the data?* (COMPLETE COVERAGE block)
+5. *What does the output look like?* (screenshot)
+6. *How do I start using it?* (READY FOR YOUR WORKFLOW + CTA)
+7. *Can I defend its recommendations?* (cites comparables, augments analysts)
+
+Judges still see all the underlying evaluation evidence — just expressed in buyer language.
+
+**Updated artifacts:**
+- `demo/render_pitch_slide_png.py`
+- `demo/generate_pitch_slide.py`
+- `docs/demo/Sabercast_Pitch_Slide.png` (regenerated)
+- `docs/demo/Sabercast_Pitch_Slide.pptx` (regenerated)
+
+---

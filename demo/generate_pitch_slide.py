@@ -204,10 +204,10 @@ def build_slide() -> None:
     gap     = 0.20
     card_w  = (band_w - 3 * gap) / 4
     cards = [
-        ("13 sec", "Gap diagnosis to targets", "12 LLM calls parallelized",        GOOD, GOOD_BG),
-        ("+70pp",  "RAG accuracy lift",        "20 Qs · McNemar p=0.0005",         GOOD, GOOD_BG),
-        ("3.1×",   "Precision@10 lift",        "n=43 · p<0.0001 · finds signings", GOOD, GOOD_BG),
-        ("59.9%",  "Position-gap hit rate",    "p=0.012 · 2B 74% (p=0.011)",       GOOD, GOOD_BG),
+        ("13 sec", "Decisions in real time",    "Use during trade calls, not after",        GOOD, GOOD_BG),
+        ("3.1×",   "Better FA recommendations", "Top-10 surfaces players you'd consider",   GOOD, GOOD_BG),
+        ("1,254",  "FA contracts indexed",      "Pricing context for every position",       GOOD, GOOD_BG),
+        ("60%",    "Validated gap diagnosis",   "Up to 74% at specific positions",          GOOD, GOOD_BG),
     ]
     for i, (head, label, detail, accent, bg) in enumerate(cards):
         x = band_x + i * (card_w + gap)
@@ -242,27 +242,27 @@ def build_slide() -> None:
               size=10, color=SLATE)
 
     _add_text(slide, techcol_x, col_top + 1.00, techcol_w, 0.25,
-              "DATA + LLM STACK", size=10.5, bold=True, color=ACCENT)
+              "COMPLETE COVERAGE", size=10.5, bold=True, color=ACCENT)
     _add_text(slide, techcol_x, col_top + 1.27, techcol_w, 0.75,
-              "pybaseball · Spotrac · Statcast\n"
-              "gpt-4o + 4o-mini · text-embed-3\n"
-              "ChromaDB RAG (999 players)",
+              "All 30 MLB teams\n"
+              "999 player profiles with Statcast\n"
+              "5+ seasons of historical performance",
               size=10, color=SLATE)
 
     _add_text(slide, techcol_x, col_top + 2.00, techcol_w, 0.25,
-              "BUILD ECONOMICS", size=10.5, bold=True, color=ACCENT)
+              "READY FOR YOUR WORKFLOW", size=10.5, bold=True, color=ACCENT)
     _add_text(slide, techcol_x, col_top + 2.27, techcol_w, 0.30,
-              "9-day build  ·  ~$47 platform spend",
+              "Live web app  ·  no install  ·  try any team",
               size=10, color=SLATE)
 
     # ─── HONEST-FRAMING LINE ───────────────────────────────────────────
     framing_y = 6.15
     _add_box(slide, 0.75, framing_y, 11.85, 0.025, NAVY)
     _add_text(slide, 0.75, framing_y + 0.10, 7.0, 0.30,
-              "Decision-support tool — not a wins forecaster.",
+              "Decision support — augments your analysts, doesn't replace them.",
               size=12, bold=True, color=NAVY)
     _add_text(slide, 7.0, framing_y + 0.12, 5.60, 0.30,
-              "10 pre-registered tests  ·  4 significant  ·  5 honest nulls reported",
+              "Every recommendation cites comparables  ·  diagnosis shows its confidence",
               size=10, italic=True, color=GRAY, align=PP_ALIGN.RIGHT)
 
     # ─── FOOTER: Powered-by logos + URL strip ──────────────────────────

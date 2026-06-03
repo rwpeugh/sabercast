@@ -253,10 +253,10 @@ def build_png() -> None:
     gap     = 0.20
     card_w  = (band_w - 3 * gap) / 4
     cards = [
-        ("13 sec", "Gap diagnosis to targets", "12 LLM calls parallelized",   GOOD, GOOD_BG),
-        ("+70pp",  "RAG accuracy lift",        "20 Qs · McNemar p=0.0005",     GOOD, GOOD_BG),
-        ("3.1×",   "Precision@10 lift",        "n=43 · p<0.0001 · finds signings", GOOD, GOOD_BG),
-        ("59.9%",  "Position-gap hit rate",    "p=0.012 · 2B 74% (p=0.011)",   GOOD, GOOD_BG),
+        ("13 sec", "Decisions in real time",   "Use during trade calls, not after", GOOD, GOOD_BG),
+        ("3.1×",   "Better FA recommendations","Top-10 surfaces players you'd consider", GOOD, GOOD_BG),
+        ("1,254",  "FA contracts indexed",     "Pricing context for every position",    GOOD, GOOD_BG),
+        ("60%",    "Validated gap diagnosis",  "Up to 74% at specific positions",       GOOD, GOOD_BG),
     ]
     for i, (head, label, detail, accent, bg) in enumerate(cards):
         x = band_x + i * (card_w + gap)
@@ -302,34 +302,34 @@ def build_png() -> None:
           "• Diagnose roster gaps + rank FA targets",
           size=9.5, color=SLATE)
 
-    # Block 2 — data + LLM stack
+    # Block 2 — complete coverage (data depth, in buyer language)
     _text(ax, fx(techcol_x), fy(col_top + 1.00),
-          "DATA + LLM STACK", size=10.5, weight="bold", color=ACCENT)
+          "COMPLETE COVERAGE", size=10.5, weight="bold", color=ACCENT)
     _text(ax, fx(techcol_x), fy(col_top + 1.25),
-          "pybaseball · Spotrac · Statcast",
+          "All 30 MLB teams",
           size=9.5, color=SLATE)
     _text(ax, fx(techcol_x), fy(col_top + 1.46),
-          "gpt-4o + 4o-mini · text-embed-3",
+          "999 player profiles with Statcast",
           size=9.5, color=SLATE)
     _text(ax, fx(techcol_x), fy(col_top + 1.67),
-          "ChromaDB RAG (999 players)",
+          "5+ seasons of historical performance",
           size=9.5, color=SLATE)
 
-    # Block 3 — build economics
+    # Block 3 — ready for your workflow (zero-lift onboarding)
     _text(ax, fx(techcol_x), fy(col_top + 2.00),
-          "BUILD ECONOMICS", size=10.5, weight="bold", color=ACCENT)
+          "READY FOR YOUR WORKFLOW", size=10.5, weight="bold", color=ACCENT)
     _text(ax, fx(techcol_x), fy(col_top + 2.25),
-          "9-day build  ·  ~$47 platform spend",
+          "Live web app  ·  no install  ·  try any team",
           size=9.5, color=SLATE)
 
     # ─── HONEST-FRAMING LINE ───────────────────────────────────────────
     framing_y = 6.15
     _hline(ax, 0.75, framing_y, 11.85, NAVY, lw=1.5)
     _text(ax, fx(0.75), fy(framing_y + 0.22),
-          "Decision-support tool — not a wins forecaster.",
+          "Decision support — augments your analysts, doesn't replace them.",
           size=12, weight="bold", color=NAVY)
     _text(ax, fx(12.60), fy(framing_y + 0.22),
-          "10 pre-registered tests  ·  4 significant  ·  5 honest nulls reported",
+          "Every recommendation cites comparables  ·  diagnosis shows its confidence",
           size=10, color=GRAY, ha="right", style="italic")
 
     # ─── FOOTER: Powered-by logo strip (own row) ──────────────────────
