@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.orchestrator import (                                # noqa: E402
+    list_team_starters,
     run_gap_filler_simple,
     run_opponent_scouting_simple,
     run_roster_builder_simple,
@@ -222,6 +223,109 @@ try:
             "(no duplicates, no overlap)")
 except Exception as e:                                          # noqa: BLE001
     _fail("dedup invariant test crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
+# ── Test 9: Roster Builder probable-pitcher feature ───────────────────────
+# When a probable starter is selected, the orchestrator should look them up,
+# attach their stat line to the result, and the LLM's narrative + lineup
+# rationales should reference the pitcher by name. Also verifies backward
+# compat: omitting probable_pitcher leaves probable_starter None.
+print("\n=== Test 9: Roster Builder probable-pitcher feature ===")
+try:
+    # 9a — starter list helper returns rows
+    starters = list_team_starters("NYY", evaluation_year=2024)
+    if not starters or len(starters) < 3:
+        _fail("list_team_starters('NYY', 2024) is empty or thin",
+              f"({len(starters) if starters else 0} starters)")
+    else:
+        _ok(f"list_team_starters('NYY', 2024) returned {len(starters)} starters",
+            f"(top: {starters[0]['name']}, {starters[0]['GS']} GS, "
+            f"{starters[0]['ERA']:.2f} ERA)")
+
+    # 9b — backward compat: omitting probable_pitcher works + leaves it None
+    r_no = run_roster_builder_simple("LAD", "NYY", 2024)
+    if r_no.get("probable_starter") is None and r_no.get("recommended_lineup"):
+        _ok("backward compat: no probable_pitcher -> probable_starter=None",
+            f"({len(r_no['recommended_lineup'])} lineup slots returned)")
+    else:
+        _fail("backward compat broken",
+              f"probable_starter={r_no.get('probable_starter')}")
+
+    # 9c — with probable pitcher specified: look-up + LLM tailoring
+    target = next((s for s in starters if "Cole" in s["name"]), starters[0])
+    r_yes  = run_roster_builder_simple(
+        "LAD", "NYY", 2024, probable_pitcher=target["name"]
+    )
+    ps = r_yes.get("probable_starter") or {}
+    if not ps or ps.get("name") != target["name"]:
+        _fail("probable_starter not attached to result",
+              f"expected={target['name']!r}  got={ps.get('name')!r}")
+    else:
+        # Did the LLM actually use the pitcher? Surname in narrative is the
+        # cheapest check — the prompt instructs the model to name them.
+        surname = target["name"].split()[-1]
+        in_narr = surname in (r_yes.get("narrative") or "")
+        rationales = " ".join(s.get("rationale", "")
+                              for s in r_yes.get("recommended_lineup", []))
+        in_rats = surname in rationales
+        if in_narr and in_rats:
+            _ok(f"probable_pitcher={target['name']!r} threaded into LLM output",
+                f"(surname in narrative AND in lineup rationales)")
+        elif in_narr or in_rats:
+            _warn(f"probable_pitcher partially threaded",
+                  f"in_narrative={in_narr}  in_rationales={in_rats}")
+        else:
+            _fail(f"probable_pitcher not used by LLM",
+                  f"surname {surname!r} absent from narrative + rationales")
+
+    # 9d — bogus pitcher name should NOT crash; should warn + fall back
+    r_bogus = run_roster_builder_simple(
+        "LAD", "NYY", 2024, probable_pitcher="Bartolo Smith Jr-Fake"
+    )
+    if r_bogus.get("probable_starter") is None and r_bogus.get("recommended_lineup"):
+        _ok("bogus probable_pitcher gracefully falls back to staff-level",
+            "(probable_starter=None, lineup still returned)")
+    else:
+        _fail("bogus probable_pitcher did not fall back cleanly",
+              f"probable_starter={r_bogus.get('probable_starter')}")
+
+    # 9e — handedness lookup: throws field present + correct
+    from core.orchestrator import _lookup_pitcher_hand
+    cases = [("Gerrit Cole", "R"), ("Carlos Rodón", "L"), ("Blake Snell", "L"),
+             ("Tarik Skubal", "L"), ("Yu Darvish", "R")]
+    misses = [name for name, exp in cases if _lookup_pitcher_hand(name) != exp]
+    if misses:
+        _fail("handedness lookup wrong for known pitchers", f"{misses}")
+    else:
+        _ok(f"handedness lookup correct for {len(cases)} known pitchers",
+            "(Cole=R · Rodón=L · Snell=L · Skubal=L · Darvish=R)")
+
+    # 9f — handedness threads into the probable_starter dict from the
+    # orchestrator's lookup; LLM should reference platoon when LHP starts
+    r_lhp = run_roster_builder_simple("LAD", "DET", 2024,
+                                       probable_pitcher="Tarik Skubal")
+    ps = r_lhp.get("probable_starter") or {}
+    if ps.get("throws") != "L":
+        _fail("probable_starter.throws missing or wrong for Skubal",
+              f"got={ps.get('throws')}")
+    else:
+        narrative_text = (r_lhp.get("narrative") or "").lower()
+        advantages_text = " ".join((a.get("area", "") + " " + a.get("evidence", ""))
+                                    for a in r_lhp.get("matchup_advantages", [])).lower()
+        platoon_signal = any(
+            token in (narrative_text + " " + advantages_text)
+            for token in ["platoon", "right-handed", "right handed", "righty",
+                          "left-handed", "left handed", "lefty", "rhb", "lhp"]
+        )
+        if platoon_signal:
+            _ok("LHP Skubal → LLM threads platoon language into narrative/advantages",
+                f"(throws=L injected, LLM produced platoon reasoning)")
+        else:
+            _warn("LHP Skubal threaded, but LLM did not surface platoon language",
+                  "(may need prompt iteration)")
+except Exception as e:                                          # noqa: BLE001
+    _fail("probable-pitcher feature test crashed", f"{type(e).__name__}: {e}")
     traceback.print_exc()
 
 

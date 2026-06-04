@@ -970,3 +970,89 @@ Judges still see all the underlying evaluation evidence — just expressed in bu
 - `docs/demo/Sabercast_Pitch_Slide.pptx` (regenerated)
 
 ---
+
+---
+
+## Entry 23 — June 3 (Polish): Roster Builder probable-pitcher selector
+
+**Trigger.** During demo-prep, recognized that Roster Builder's matchup advice was staff-level — *"the opponent's pitchers are X, Y, Z, here's a lineup against them in aggregate."* That's strategically thin for a real day-of-game decision, where the manager knows the probable starter and wants the lineup tailored to attacking THAT pitcher's specific weaknesses.
+
+**Decision before implementation.** Estimated 2–2.5 hours active work; decided to defer it past the demo and ship in this polish window. Actual time to ship: ~75 minutes (faster than estimated because the orchestrator already had clean separation between data prep and the LLM call, so adding the probable-starter context was a localized change).
+
+**What got built.**
+
+- **`list_team_starters(team_abbr, evaluation_year, min_gs=5)`** — new orchestrator helper that returns the team's starting rotation (GS≥5) as `{name, GS, IP, ERA, WHIP, K9}` rows sorted by GS descending. Used by the UI to populate the probable-pitcher dropdown.
+- **`_lookup_pitcher_row(name, team_pit_df)`** — new helper that finds one pitcher in the team's pitching slice by name, with ascii-folded fallback so José vs Jose doesn't miss. Returns the full stat line (ERA, WHIP, K/9, BB/9, HR/9, IP, GS) or `None` if the pitcher isn't on that team's roster.
+- **`run_roster_builder_simple(...)`** gained an optional `probable_pitcher: str | None = None` parameter. When provided, it's looked up via `_lookup_pitcher_row` and attached to the result as `probable_starter`. When None or unfound, the orchestrator behaves exactly as before — backward compat verified by a regression test.
+- **`build_roster_llm(...)`** gained an optional `probable_starter: dict | None = None` parameter that's injected into the gpt-4o user payload as `probable_starter`.
+- **`ROSTER_BUILDER_SYSTEM`** prompt rewritten to handle both modes: when `probable_starter` is non-null, the model MUST cite the pitcher by name in the narrative and tailor lineup ordering to attacking THAT pitcher's profile specifically; when null, reason about the staff as a whole.
+- **`app/tabs/roster_builder.py`** UI: replaced the "Scouting as of" info column with a probable-pitcher dropdown filtered to the selected opponent's starters. Format: `"Gerrit Cole · 22 GS · 3.12 ERA · 1.161 WHIP"`. Caching with `@st.cache_data` so flipping opponents doesn't re-read the pitching CSV. Default option is `"— Any starter / staff-level —"` (sentinel for None). Cache key includes `probable_pitcher` so different starter choices don't collide. A "Facing tonight: [name]" callout shows above the lineup when a starter is selected.
+- **`demo/smoke_test_edge_cases.py`** Test 9 (new): four sub-checks — list helper returns rows, backward compat preserved (no `probable_pitcher` → `probable_starter=None`), with probable pitcher the surname appears in BOTH the narrative AND the lineup rationales, bogus pitcher name gracefully falls back without crashing.
+
+**Verification.** Live LLM call with `probable_pitcher='Gerrit Cole'` on LAD vs NYY produced:
+- Narrative: *"The Dodgers should focus on exploiting Gerrit Cole's slightly elevated WHIP and moderate strikeout rate by emphasizing contact and patience..."*
+- Lineup rationales: *"Leadoff with high OBP to challenge Cole's WHIP"*, *"Patient hitter to work counts against Cole"*, *"Speed and contact to exploit Cole's WHIP"*
+- Matchup advantages: *attack high WHIP early innings (Cole's WHIP of 1.161)*, *capitalize on Cole's moderate K/9 (8.8)*
+
+Cole's name appears 4× in the structured output. The matchup advantages cite his specific stat values, not aggregate staff numbers. This is the demo moment the feature was built for.
+
+**Full smoke suite:** 12 passed · 1 warned · 0 failed.
+
+**Demo prep doc updated.** `docs/demo/DEMO_PREP.md` Roster Builder section now includes the probable-pitcher step with a sample narration script for the LAD vs NYY/Cole demo.
+
+**What's NOT in this entry.** Pitcher handedness (L/R). The Bref pitching CSV doesn't carry a Throws column, so platoon-aware lineup ordering isn't possible without either pulling Statcast pitch data or maintaining a curated handedness CSV. Left in the backlog as a follow-on.
+
+**Updated artifacts:**
+- `core/orchestrator.py` — `list_team_starters`, `_lookup_pitcher_row`, `ROSTER_BUILDER_SYSTEM`, `build_roster_llm`, `run_roster_builder_simple`
+- `app/tabs/roster_builder.py` — probable-pitcher dropdown + Facing tonight callout
+- `demo/smoke_test_edge_cases.py` — Test 9
+- `docs/demo/DEMO_PREP.md` — updated Roster Builder flow
+
+---
+
+---
+
+## Entry 24 — June 3 (Polish): Pitcher handedness for platoon-aware lineups
+
+**Trigger.** Entry 23 shipped the probable-pitcher selector, but the Bref pitching CSV from Pipeline 01 doesn't carry a Throws column. Without handedness, the LLM can't do platoon-aware lineup ordering — the single sharpest, most defensible move a manager makes with a probable-starter announcement.
+
+**Data-source pivot.** My first plan was Lahman People.csv via pybaseball — has bats/throws for ~20,000 players. Hit two dead ends:
+1. ``pybaseball.lahman.people()`` calls a stale Lahman zip URL that 404s as of mid-2026.
+2. The Chadwick Bureau ``baseballdatabank`` GitHub repo has been reorganised; the previously-canonical ``master/core/People.csv`` and ``master/contrib/People.csv`` both 404.
+
+Pivoted to the MLB Stats API (``statsapi.mlb.com``), which exposes ``pitchHand.code`` on every active player, is free, requires no auth, and is the authoritative source anyway. One ``GET /api/v1/sports/1/players?season=YYYY`` per season returns 700-850 pitchers each, all with handedness.
+
+**What got built.**
+
+- **`pipelines/01d_pull_handedness.py`** (new) — pulls 2019-2024 from the MLB Stats API, filters to position=P with non-null pitchHand, dedupes by mlbam_id keeping the latest season, saves to ``data/raw/player_handedness.csv``. Tenacity retry, 0.5s rate-limit between calls. 1,604 unique pitchers covered.
+- **`_load_handedness()` + `_lookup_pitcher_hand(name)` in `core/orchestrator.py`** — module-cached loader returning ``{ascii-folded-name: throws-code}``. The fold matches against ``_ascii_fold`` so "José Berríos" (Bref) matches "Jose Berrios" (Spotrac) or any other diacritic variant.
+- **`_lookup_pitcher_row()` enriched** — now returns a ``throws`` field ("R" | "L" | "S" | None) alongside the existing stat line. Also fixed an unrelated bug along the way: Bref's CSV only carries SO9 (not BB9 / HR9), so my Entry-23 lookup was emitting BB9=0.0 / HR9=0.0 for every starter. Now computed from raw BB and HR counts over IP.
+- **`ROSTER_BUILDER_SYSTEM` prompt updated** — when ``probable_starter.throws`` is non-null, the prompt instructs the LLM to stack opposite-handed batters into the high-leverage spots (1-5), call out the platoon advantage in at least one lineup rationale and one matchup_advantages entry, and treat switch-hitters as platoon-neutral. When throws is null, reason from stat line alone — no hallucinating handedness.
+- **UI badge in `app/tabs/roster_builder.py`** — the "Facing tonight" callout now shows "**LHP**" / "**RHP**" / "**SHP**" beside the pitcher name. The caption explicitly says whether platoon-aware ordering is on or whether handedness is unknown.
+
+**Verification.** Live LLM call against LAD vs DET with Tarik Skubal (LHP) selected:
+
+- Narrative: *"The Dodgers should focus on exploiting Tarik Skubal's left-handed pitching by stacking right-handed hitters at the top of the lineup..."*
+- Lineup 1-5: Betts (R), Freeman (LHB but high OBP), Ohtani (S), Teoscar Hernández (R), Will Smith (R). Muncy (LHB) pushed to 6, Lux (LHB) to 9. Switch-hitter Edman slotted at 7 with rationale calling out switch-hitting platoon neutrality.
+- Matchup advantage #1 (HIGH): "exploit platoon advantage" — evidence: "Stack right-handed hitters against Skubal's left-handed pitching."
+- Matchup advantage #3: "capitalize on low BB/9" — evidence: "Skubal's BB/9 of 1.58" (correct now that BB9 is computed, not zero).
+
+**Smoke suite extended.** Test 9 now has six sub-checks (was four): adds (9e) handedness lookup correctness against five known pitchers — Cole=R, Rodón=L, Snell=L, Skubal=L, Darvish=R — and (9f) end-to-end verification that selecting an LHP causes the LLM to surface platoon language in either the narrative or the matchup advantages. **Full suite: 14 passed · 1 warned · 0 failed.**
+
+**Performance.** No measurable latency impact. The handedness CSV is 82 KB and loads once into a module-level cache; subsequent lookups are dict-keyed in O(1).
+
+**Honest limits.**
+- 1 pitcher in the dataset is a switch-pitcher (Pat Venditte, throws=S). The prompt handles "S" by treating the pitcher as effectively neutral — not strictly accurate (a switch-pitcher actually adjusts to each batter), but no one in the active 2024 demo set is a switch-pitcher.
+- Lahman pivot was a real ~15-minute detour. Documenting it here so the next contributor doesn't burn the same time chasing the pybaseball wrapper.
+
+**Demo prep updated.** DEMO_PREP.md Roster Builder demo flow now leads with the Tarik Skubal LHP case (showcases platoon ordering most clearly) and offers Gerrit Cole as the RHP variant.
+
+**Updated artifacts:**
+- `pipelines/01d_pull_handedness.py` — NEW
+- `data/raw/player_handedness.csv` — NEW (82.6 KB · 1,604 pitchers)
+- `core/orchestrator.py` — `_load_handedness`, `_lookup_pitcher_hand`, `_lookup_pitcher_row` (throws + computed BB9/HR9), `ROSTER_BUILDER_SYSTEM`
+- `app/tabs/roster_builder.py` — handedness badge in the Facing tonight callout
+- `demo/smoke_test_edge_cases.py` — Test 9e + 9f
+- `docs/demo/DEMO_PREP.md` — Skubal/LHP demo flow
+
+---

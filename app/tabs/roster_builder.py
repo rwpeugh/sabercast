@@ -1,8 +1,9 @@
 """Tab 1: Roster Builder — functional implementation.
 
-Picks a team + opponent, aggregates the team's hitters and the opponent's
-pitchers + defensive profile, and makes one gpt-4o call returning a
-structured recommendation: lineup, matchup advantages, risks, narrative.
+Picks a team + opponent (and optionally the opponent's probable starting
+pitcher), aggregates the team's hitters and the opponent's pitchers +
+defensive profile, and makes one gpt-4o call returning a structured
+recommendation: lineup, matchup advantages, risks, narrative.
 """
 from __future__ import annotations
 
@@ -10,8 +11,27 @@ import streamlit as st
 
 from core.orchestrator import (
     TEAM_ABBR_TO_BREF,
+    list_team_starters,
     run_roster_builder_simple,
 )
+
+
+_NO_PITCHER_SENTINEL = "— Any starter / staff-level —"
+
+
+@st.cache_data(show_spinner=False)
+def _cached_team_starters(team_abbr: str, evaluation_year: int) -> list[dict]:
+    """Cache the per-team starter list so flipping opponents doesn't re-read
+    the pitching CSV every time."""
+    try:
+        return list_team_starters(team_abbr, evaluation_year=evaluation_year)
+    except Exception:
+        return []
+
+
+def _format_starter_label(row: dict) -> str:
+    return (f"{row['name']}  ·  {row['GS']} GS  ·  "
+            f"{row['ERA']:.2f} ERA  ·  {row['WHIP']:.3f} WHIP")
 
 
 def _get_cache() -> dict:
@@ -32,12 +52,12 @@ def _leverage_chip(leverage: str) -> str:
 def render() -> None:
     st.subheader("Roster Builder")
     st.caption(
-        "Day-to-day lineup construction. Pick the team you're managing and the "
-        "opponent for an upcoming game. The orchestrator aggregates your "
-        "qualified hitters and the opponent's top pitchers + per-position "
-        "defensive deltas, then asks GPT-4o to construct a recommended 9-player "
-        "lineup with matchup-specific reasoning. No payroll input — this tab "
-        "uses the existing roster as is."
+        "Day-to-day lineup construction (scouting as of end of 2024 season). "
+        "Pick the team you're managing, the opponent for an upcoming game, "
+        "and — when available — the opponent's confirmed probable starter. "
+        "When a probable starter is selected, the lineup ordering and matchup "
+        "plan are tailored specifically to that pitcher's stat profile. "
+        "No payroll input — this tab uses the existing roster as is."
     )
 
     evaluation_year = 2024
@@ -62,12 +82,30 @@ def render() -> None:
             key="roster_builder_opponent",
         )
     with col3:
-        st.markdown("**Scouting as of**")
-        st.markdown(f"end of **{evaluation_year}** season")
+        starters = _cached_team_starters(opponent, evaluation_year)
+        if starters:
+            options    = [_NO_PITCHER_SENTINEL] + [s["name"] for s in starters]
+            label_map  = {_NO_PITCHER_SENTINEL: _NO_PITCHER_SENTINEL}
+            label_map.update({s["name"]: _format_starter_label(s) for s in starters})
+            pitcher_choice = st.selectbox(
+                "Opponent probable starter (optional)",
+                options=options,
+                format_func=lambda v: label_map.get(v, v),
+                key=f"roster_builder_pitcher_{opponent}",
+                help=("When selected, the lineup is tailored specifically to "
+                      "attacking this pitcher's stat profile. Leave on the "
+                      "default for staff-level reasoning."),
+            )
+        else:
+            pitcher_choice = _NO_PITCHER_SENTINEL
+            st.caption(f"No {evaluation_year} starter data on file for {opponent}.")
+
+    probable_pitcher = (None if pitcher_choice == _NO_PITCHER_SENTINEL
+                        else pitcher_choice)
 
     if st.button("Build roster + matchup plan", type="primary"):
         cache = _get_cache()
-        cache_key = (team, opponent, evaluation_year)
+        cache_key = (team, opponent, evaluation_year, probable_pitcher)
         if cache_key in cache:
             result = cache[cache_key]
             st.success(
@@ -75,8 +113,9 @@ def render() -> None:
                 f"(was {result['elapsed_seconds']}s on the first run)."
             )
         else:
-            with st.status(f"Building lineup for {team} vs {opponent}…",
-                            expanded=True) as status:
+            status_label = (f"Building lineup for {team} vs {opponent}"
+                            f"{' (vs ' + probable_pitcher + ')' if probable_pitcher else ''}…")
+            with st.status(status_label, expanded=True) as status:
                 def progress(label: str) -> None:
                     status.update(label=label)
                     st.write(f"• {label}")
@@ -84,6 +123,7 @@ def render() -> None:
                 result = run_roster_builder_simple(
                     team_abbr=team, opponent_abbr=opponent,
                     evaluation_year=evaluation_year,
+                    probable_pitcher=probable_pitcher,
                     progress=progress,
                 )
                 status.update(
@@ -100,9 +140,29 @@ def render() -> None:
         return
 
     # ── Narrative ────────────────────────────────────────────────────────────
-    st.markdown(
-        f"### {result['team']} vs. {result['opponent']} — strategy ({result['year']})"
-    )
+    header = f"### {result['team']} vs. {result['opponent']} — strategy ({result['year']})"
+    starter = result.get("probable_starter")
+    if starter:
+        header += f"  ·  facing **{starter['name']}**"
+    st.markdown(header)
+    if starter:
+        with st.container(border=True):
+            throws = starter.get("throws")
+            hand_badge = {"R": "RHP", "L": "LHP", "S": "SHP"}.get(throws or "", "")
+            hand_label = f"  ·  **{hand_badge}**" if hand_badge else ""
+            st.markdown(
+                f"**Facing tonight: {starter['name']}**{hand_label}  ·  "
+                f"{starter['GS']} GS  ·  {starter['IP']:.1f} IP  ·  "
+                f"**{starter['ERA']:.2f}** ERA  ·  {starter['WHIP']:.3f} WHIP  ·  "
+                f"{starter['K9']:.1f} K/9  ·  {starter.get('BB9', 0):.1f} BB/9  ·  "
+                f"{starter.get('HR9', 0):.2f} HR/9"
+            )
+            caption_extra = (" Platoon-aware lineup ordering is on." if hand_badge
+                             else " (Handedness unknown — falling back to stat-profile reasoning.)")
+            st.caption(
+                "Lineup ordering and matchup plan below are tailored to this pitcher's profile."
+                + caption_extra
+            )
     st.write(result["narrative"])
 
     # ── Lineup card ──────────────────────────────────────────────────────────

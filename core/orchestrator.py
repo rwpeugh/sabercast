@@ -42,6 +42,49 @@ def _ascii_fold(s: str) -> str:
         return s
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pitcher handedness lookup — Roster Builder uses this for platoon-aware lineup
+# ordering when a probable starter is selected. Data sourced from MLB Stats API
+# via pipelines/01d_pull_handedness.py and stored at data/raw/player_handedness.csv.
+# ──────────────────────────────────────────────────────────────────────────────
+_HANDEDNESS_CACHE: dict[str, str] | None = None
+
+
+def _load_handedness() -> dict[str, str]:
+    """Return a {ascii-folded-lowered-name: throws-code} lookup. Cached.
+
+    ``throws-code`` is one of "R", "L", "S" (Pat Venditte, the lone switch
+    pitcher in the dataset). Missing handedness data is silently ignored —
+    callers fall back to None and let the LLM reason from the stat line alone.
+    """
+    global _HANDEDNESS_CACHE
+    if _HANDEDNESS_CACHE is not None:
+        return _HANDEDNESS_CACHE
+    p = Path(__file__).resolve().parent.parent / "data" / "raw" / "player_handedness.csv"
+    if not p.exists():
+        _HANDEDNESS_CACHE = {}
+        return _HANDEDNESS_CACHE
+    df = pd.read_csv(p, encoding="utf-8")
+    lookup: dict[str, str] = {}
+    for _, row in df.iterrows():
+        name = str(row.get("name", "")).strip()
+        throws = str(row.get("throws", "")).strip()
+        if not name or not throws:
+            continue
+        key = _ascii_fold(name).lower()
+        lookup[key] = throws
+    _HANDEDNESS_CACHE = lookup
+    return lookup
+
+
+def _lookup_pitcher_hand(name: str) -> str | None:
+    """Look up a pitcher's throwing hand. Returns "R" / "L" / "S" or None."""
+    if not name:
+        return None
+    key = _ascii_fold(str(name)).lower()
+    return _load_handedness().get(key)
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths and constants
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1335,15 +1378,114 @@ def _top_pitchers(team_pit_df: pd.DataFrame, n: int = 5) -> list[dict]:
     ]
 
 
+def list_team_starters(team_abbr: str, evaluation_year: int = 2024,
+                       min_gs: int = 5) -> list[dict]:
+    """List a team's starting-pitcher options for the Roster Builder's
+    probable-pitcher dropdown. Returns rows sorted by GS descending so the
+    workhorse starter (ace) is at the top.
+
+    Each row: {"name": str, "GS": int, "IP": float, "ERA": float, "WHIP": float, "K9": float}.
+
+    ``min_gs`` filters out long relievers / spot starters. Default 5 matches
+    the threshold ``_top_pitchers`` uses to classify pitchers as starters.
+    """
+    if team_abbr not in TEAM_ABBR_TO_BREF:
+        raise ValueError(f"Unknown team abbreviation: {team_abbr}")
+    bref_team = TEAM_ABBR_TO_BREF[team_abbr]
+    league    = TEAM_ABBR_TO_LEAGUE.get(team_abbr)
+    pit_path  = DATA_RAW / f"pitching_{evaluation_year}.csv"
+    if not pit_path.exists():
+        return []
+    pitching = pd.read_csv(pit_path, encoding="utf-8")
+    team_pit = _filter_team(pitching, bref_team, league=league)
+    starters = team_pit[team_pit["GS"].fillna(0) >= min_gs].copy()
+    if starters.empty:
+        return []
+    starters = starters.sort_values("GS", ascending=False)
+    rows: list[dict] = []
+    seen: set[str] = set()
+    for _, row in starters.iterrows():
+        name = str(row.get("Name", "")).strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        rows.append({
+            "name": name,
+            "GS":   int(row.get("GS", 0) or 0),
+            "IP":   round(float(row.get("IP", 0) or 0), 1),
+            "ERA":  round(float(row.get("ERA", 0) or 0), 2),
+            "WHIP": round(float(row.get("WHIP", 0) or 0), 3),
+            "K9":   round(float(row.get("SO9", 0) or 0), 1),
+        })
+    return rows
+
+
+def _lookup_pitcher_row(pitcher_name: str, team_pit_df: pd.DataFrame) -> dict | None:
+    """Look up one pitcher's full stat line by name, within a team's pitching slice.
+
+    Returns the formatted stat dict the LLM consumes, or ``None`` if the
+    pitcher isn't found. Falls back to ascii-folded name matching so accent
+    differences (José vs Jose) don't cause misses.
+    """
+    if not pitcher_name:
+        return None
+    needle      = str(pitcher_name).strip()
+    needle_fold = _ascii_fold(needle).lower()
+    match = team_pit_df[team_pit_df["Name"].astype(str).str.strip() == needle]
+    if match.empty:
+        match = team_pit_df[
+            team_pit_df["Name"].astype(str).map(lambda n: _ascii_fold(str(n)).lower())
+            == needle_fold
+        ]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    name_clean = str(row["Name"]).strip()
+    ip = float(row.get("IP", 0) or 0)
+    # Bref's CSV carries SO9 directly but not BB9 / HR9. Compute those from
+    # raw counts (BB, HR) and innings. Guards against IP=0 division.
+    bb = float(row.get("BB", 0) or 0)
+    hr = float(row.get("HR", 0) or 0)
+    bb9 = (9.0 * bb / ip) if ip > 0 else 0.0
+    hr9 = (9.0 * hr / ip) if ip > 0 else 0.0
+    return {
+        "name":   name_clean,
+        "throws": _lookup_pitcher_hand(name_clean),       # "R" / "L" / "S" / None
+        "IP":     round(ip, 1),
+        "GS":     int(row.get("GS", 0) or 0),
+        "ERA":    round(float(row.get("ERA", 0) or 0), 2),
+        "WHIP":   round(float(row.get("WHIP", 0) or 0), 3),
+        "K9":     round(float(row.get("SO9", 0) or 0), 1),
+        "BB9":    round(bb9, 1),
+        "HR9":    round(hr9, 2),
+    }
+
+
 ROSTER_BUILDER_SYSTEM = """You are an MLB game-strategy analyst helping a front office build the
 best starting lineup against a specific opponent. You receive:
   * The team's qualified hitters (2024 stat lines, top 12 by OPS)
   * The opponent's qualified pitchers (top 5 by ERA — a mix of starters and
-    relievers; you do not know which one will start, so reason about the staff
-    overall and the most likely starter by IP/GS)
+    relievers, useful for thinking about the staff overall and bullpen leverage)
   * The opponent's per-position defensive deltas vs. league (where positive
     OAA means the opponent's defense is above average and offense is harder
     to find against them)
+  * OPTIONAL: ``probable_starter`` — when present, this is the opponent's
+    confirmed probable starter for tonight, with their season stat line:
+    ``throws`` ("R" | "L" | "S" | null), ERA, WHIP, K/9, BB/9, HR/9, IP, GS.
+    When this field is provided, the lineup ordering and the narrative MUST
+    be specifically tailored to attacking THIS pitcher's profile, not the
+    staff in general. Cite the starter by name in the narrative.
+
+    When ``throws`` is non-null, the lineup MUST be PLATOON-AWARE: stack
+    opposite-handed hitters (right-handed batters against a left-handed
+    pitcher, and vice versa) into the high-leverage spots (1-5). Switch
+    hitters are neutral and can slot anywhere. Note the platoon advantage
+    in at least one lineup rationale and one matchup_advantages entry.
+    When ``throws`` is null, do not invent handedness — reason from the
+    stat line alone.
+
+    When ``probable_starter`` is null entirely, reason about the staff as a
+    whole.
 
 Return STRICT JSON only, no prose, with this exact schema:
 
@@ -1351,12 +1493,12 @@ Return STRICT JSON only, no prose, with this exact schema:
   "team": "<3-letter abbr>",
   "opponent": "<3-letter abbr>",
   "year": 2024,
-  "narrative": "<2-3 sentence strategic summary of how this team should attack this opponent>",
+  "narrative": "<2-3 sentence strategic summary of how this team should attack this opponent — name the probable starter if one is provided>",
   "recommended_lineup": [
-    {"order": <1-9>, "player_name": "<name>", "position": "<C|1B|2B|3B|SS|LF|CF|RF|DH>", "rationale": "<one short phrase, why this slot/order>"}
+    {"order": <1-9>, "player_name": "<name>", "position": "<C|1B|2B|3B|SS|LF|CF|RF|DH>", "rationale": "<one short phrase, why this slot/order — reference the probable starter's specific weaknesses when applicable>"}
   ],
   "matchup_advantages": [
-    {"area": "<short label, e.g. 'opposing LHP weakness vs RHB'>", "evidence": "<one short phrase citing stats>", "leverage": "high" | "medium" | "low"}
+    {"area": "<short label, e.g. 'attack high WHIP early innings'>", "evidence": "<one short phrase citing stats from the probable starter or the staff>", "leverage": "high" | "medium" | "low"}
   ],
   "matchup_risks": [
     {"area": "<short label>", "mitigation": "<one sentence on how to neutralize it>"}
@@ -1374,8 +1516,14 @@ in the data provided; do not reference 2025+ events or trades."""
 def build_roster_llm(team_abbr: str, opponent_abbr: str,
                     team_hitters: list[dict],
                     opponent_pitchers: list[dict],
-                    opponent_defense_deltas: dict | None) -> dict:
-    """One gpt-4o call producing the roster-builder report as structured JSON."""
+                    opponent_defense_deltas: dict | None,
+                    probable_starter: dict | None = None) -> dict:
+    """One gpt-4o call producing the roster-builder report as structured JSON.
+
+    When ``probable_starter`` is provided, the prompt instructs the model to
+    tailor lineup ordering and narrative specifically to that pitcher's stat
+    profile. When None, the model reasons about the staff as a whole.
+    """
     oai = _client()
     user_payload = {
         "team":     team_abbr,
@@ -1384,6 +1532,7 @@ def build_roster_llm(team_abbr: str, opponent_abbr: str,
         "team_top_hitters":         team_hitters,
         "opponent_top_pitchers":    opponent_pitchers,
         "opponent_defense_deltas":  opponent_defense_deltas,
+        "probable_starter":         probable_starter,
     }
     resp = oai.chat.completions.create(
         model=GPT4O,
@@ -1401,6 +1550,7 @@ def build_roster_llm(team_abbr: str, opponent_abbr: str,
 def run_roster_builder_simple(team_abbr: str = "SEA",
                               opponent_abbr: str = "HOU",
                               evaluation_year: int = 2024,
+                              probable_pitcher: str | None = None,
                               progress: ProgressCallback = None) -> dict:
     """Day-to-day lineup construction for one game against one specific opponent.
 
@@ -1409,6 +1559,12 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
     pitchers (IP >= 30), plus the opponent's per-position defensive deltas
     if Statcast data is available. One ``gpt-4o`` call returns a structured
     recommendation: lineup, advantages, risks, narrative.
+
+    ``probable_pitcher`` (optional): the opponent's confirmed probable starter
+    for this game, by player name. When provided, the LLM gets that pitcher's
+    full stat line and is instructed to tailor lineup ordering specifically
+    to attacking THIS pitcher rather than the staff as a whole. When None,
+    the orchestrator behaves exactly as it did before this feature was added.
     """
     def _tick(label: str) -> None:
         if progress is not None:
@@ -1442,6 +1598,14 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
     team_hitters     = _top_hitters(team_bat_df,  n=12)
     opponent_pitchers = _top_pitchers(opp_pit_df, n=5)
 
+    probable_starter: dict | None = None
+    if probable_pitcher:
+        probable_starter = _lookup_pitcher_row(probable_pitcher, opp_pit_df)
+        if probable_starter is None:
+            _tick(f"Warning: probable starter '{probable_pitcher}' not found on "
+                  f"{opponent_abbr}'s {evaluation_year} pitching roster — falling "
+                  f"back to staff-level reasoning")
+
     opponent_defense_deltas: dict | None = None
     if oaa_df is not None and sprint_df is not None:
         _tick(f"Aggregating {opponent_abbr}'s defensive profile (per-position OAA, sprint, catcher pop time)")
@@ -1449,9 +1613,15 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
         league_def = aggregate_league_defense_per_team(oaa_df, catcher_df, sprint_df)
         opponent_defense_deltas = compute_defense_deltas(opp_def, league_def)
 
-    _tick(f"Asking GPT-4o to build a lineup and matchup plan for {team_abbr} vs {opponent_abbr}")
+    if probable_starter:
+        _tick(f"Asking GPT-4o to build a lineup tailored to attacking "
+              f"{probable_starter['name']} ({probable_starter['ERA']:.2f} ERA, "
+              f"{probable_starter['WHIP']:.3f} WHIP)")
+    else:
+        _tick(f"Asking GPT-4o to build a lineup and matchup plan for {team_abbr} vs {opponent_abbr}")
     report = build_roster_llm(team_abbr, opponent_abbr, team_hitters,
-                              opponent_pitchers, opponent_defense_deltas)
+                              opponent_pitchers, opponent_defense_deltas,
+                              probable_starter=probable_starter)
 
     return {
         "team":     team_abbr,
@@ -1461,6 +1631,7 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
         "team_hitters":       team_hitters,
         "opponent_pitchers":  opponent_pitchers,
         "opponent_defense_deltas": opponent_defense_deltas,
+        "probable_starter":   probable_starter,
         "narrative":          report.get("narrative", ""),
         "recommended_lineup": report.get("recommended_lineup", []),
         "matchup_advantages": report.get("matchup_advantages", []),
