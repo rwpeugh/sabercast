@@ -166,19 +166,44 @@ def render() -> None:
     st.write(result["narrative"])
 
     # ── Lineup card ──────────────────────────────────────────────────────────
+    # NB: rendered as a hand-built HTML table instead of st.dataframe because
+    # Streamlit's default dataframe widget uses Glide Data Grid (canvas-based)
+    # which has known kerning quirks on certain capital + diacritic letter
+    # combinations -- "Víctor Robles" rendered with a visible gap between V and
+    # í while "Julio Rodríguez" rendered cleanly even though both use the same
+    # precomposed U+00ED character. Switching to HTML lets the browser's native
+    # text layout handle the kerning correctly.
     st.markdown("### Recommended starting lineup")
     lineup = result.get("recommended_lineup") or []
     if lineup:
-        rows = [
-            {
-                "Order":      slot.get("order", "?"),
-                "Position":   slot.get("position", "?"),
-                "Player":     slot.get("player_name", "?"),
-                "Rationale":  slot.get("rationale", ""),
-            }
-            for slot in sorted(lineup, key=lambda s: s.get("order", 99))
-        ]
-        st.dataframe(rows, hide_index=True, use_container_width=True)
+        import html as _html
+        slots_sorted = sorted(lineup, key=lambda s: s.get("order", 99))
+        header_cells = "".join(
+            f"<th style='text-align:left;padding:6px 12px;border-bottom:2px solid #ddd;"
+            f"font-weight:600;color:#555;font-size:0.85em'>{label}</th>"
+            for label in ("Order", "Position", "Player", "Rationale")
+        )
+        body_rows = []
+        for slot in slots_sorted:
+            order   = _html.escape(str(slot.get("order", "?")))
+            pos     = _html.escape(str(slot.get("position", "?")))
+            player  = _html.escape(str(slot.get("player_name", "?")))
+            rat     = _html.escape(str(slot.get("rationale", "")))
+            body_rows.append(
+                f"<tr>"
+                f"<td style='padding:6px 12px;border-bottom:1px solid #eee'>{order}</td>"
+                f"<td style='padding:6px 12px;border-bottom:1px solid #eee'>{pos}</td>"
+                f"<td style='padding:6px 12px;border-bottom:1px solid #eee'>{player}</td>"
+                f"<td style='padding:6px 12px;border-bottom:1px solid #eee;color:#555'>{rat}</td>"
+                f"</tr>"
+            )
+        table_html = (
+            f"<table style='width:100%;border-collapse:collapse;font-size:0.95em'>"
+            f"<thead><tr>{header_cells}</tr></thead>"
+            f"<tbody>{''.join(body_rows)}</tbody>"
+            f"</table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
     else:
         st.warning("No lineup returned. Re-run, or check the orchestrator output.")
 

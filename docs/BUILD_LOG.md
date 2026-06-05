@@ -1620,3 +1620,49 @@ The deployed app is showing the pre-Entry-23 state (Roster Builder with the old 
 **Time across all five tasks: ~90 minutes.**
 
 ---
+
+---
+
+## Entry 33 — June 4: Fix Víctor Robles rendering glitch in Roster Builder lineup
+
+**Bug report from the user:** the Recommended Starting Lineup table on the Roster Builder tab rendered "Víctor Robles" with a visible space between the V and the í, even though "Julio Rodríguez" in the same column rendered cleanly.
+
+**Root cause.** Both names use the precomposed U+00ED LATIN SMALL LETTER I WITH ACUTE in the underlying data (verified by inspecting `batting_2024.csv` bytes and the LLM-returned `player_name` field). The DOM also has the exact correct text — Playwright pulled `'Víctor Robles'` from the cell with bytes `b'V\xc3\xadctor Robles'`.
+
+The space exists only at the **render layer**: Streamlit's `st.dataframe` uses [Glide Data Grid](https://github.com/glideapps/glide-data-grid), a canvas-based grid library. The cells are painted to a `<canvas>` element, not laid out by the browser's HTML text engine. Glide's canvas text renderer has known kerning quirks for certain capital-letter + diacritic combinations — V+í happens to be one of them; J+u+l+i+o+R+o+d+r+í (where the í is mid-word, between consonants) doesn't trigger it. Other Streamlit users have reported similar issues with `st.dataframe` and accented characters.
+
+The rendering is also **inconsistent** across runs — when I drove the bug with Playwright Chromium, sometimes the gap was visible and sometimes it wasn't, depending on column-width and font-load timing. That intermittency was the tell that it's a render-layer artifact, not a data-pipeline issue.
+
+**Fix.** Replaced the lineup `st.dataframe(...)` call with a hand-built HTML table rendered via `st.markdown(..., unsafe_allow_html=True)`. HTML rendering hands off to the browser's native text-layout engine, which kerns V+í correctly with every common font. As a side benefit, the new table has cleaner inline styling and no widget chrome (no search/sort/download icons).
+
+```python
+# Before
+st.dataframe(rows, hide_index=True, use_container_width=True)
+
+# After
+table_html = (
+    f"<table style='width:100%;border-collapse:collapse;font-size:0.95em'>"
+    f"<thead><tr>{header_cells}</tr></thead>"
+    f"<tbody>{''.join(body_rows)}</tbody>"
+    f"</table>"
+)
+st.markdown(table_html, unsafe_allow_html=True)
+```
+
+Player names + rationale text are HTML-escaped via `html.escape` before insertion to keep the rendering safe against any future LLM output that might include `<` or `&`.
+
+**Verification.** Re-ran the Playwright debug script `demo/debug_robles_render.py` after the fix. The lineup table is now HTML (Playwright reports 0 Glide cells), and the rendered Víctor Robles cell shows clean text with proper diacritic — visible in `docs/checkpoint3/debug_robles_lineup_full.png`.
+
+### Scope of the fix
+
+Only the Roster Builder's **lineup table** was switched to HTML. Other `st.dataframe` uses in the app (expander tables in Roster Builder, Gap Filler, Opponent Scouting) are left as-is. They mostly carry stat lines with few or no accented characters and the user hasn't reported issues. If similar reports come in for other tables, the same pattern applies.
+
+### Updated artifacts
+
+- `app/tabs/roster_builder.py` — lineup table rewritten as HTML
+- `demo/debug_robles_render.py` — NEW Playwright introspection script for verifying canvas-vs-HTML rendering of accented player names
+- `docs/checkpoint3/debug_robles_lineup_full.png` — fixed-state screenshot
+
+**Time: ~25 minutes (15 investigating canvas-vs-HTML hypothesis, 10 implementing + verifying).**
+
+---
