@@ -482,6 +482,99 @@ def _lookup_candidate_catcher_pop(name: str,
     return round(float(val), 3) if pd.notna(val) else None
 
 
+def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
+                              evaluation_year: int) -> dict:
+    """Estimate the team's committed payroll for the upcoming season
+    (``market_year = evaluation_year + 1``).
+
+    Sums AAV for contracts where the player is on this team AND the contract
+    was signed on or before ``evaluation_year`` AND the contract is still
+    active in ``market_year`` (i.e., ``signed_year + years > market_year``).
+
+    Returns a dict carrying:
+      * ``committed_total``  -- USD sum of qualifying AAVs
+      * ``n_contracts``      -- count of contracts that qualified
+      * ``breakdown``        -- list of {player_name, position, aav, signed_year, years}
+                                sorted by AAV desc, for transparency in the UI
+      * ``market_year``      -- the year we're projecting committed payroll INTO
+      * ``coverage_caveat``  -- one-line note that our contracts dataset doesn't
+                                cover league-minimum / pre-arb players, so this
+                                figure UNDER-COUNTS reality
+
+    NOTE on no-look-ahead. We filter ``signed_year <= evaluation_year`` so a
+    historical backtest doesn't leak future signings into the committed
+    payroll. This is the same discipline applied to the candidate-pool filter.
+    """
+    market_year = evaluation_year + 1
+    if contracts is None or contracts.empty:
+        return {
+            "committed_total":  0.0,
+            "n_contracts":      0,
+            "breakdown":        [],
+            "market_year":      market_year,
+            "coverage_caveat":  "No contracts dataset available.",
+        }
+    team_rows = contracts[contracts["team"].astype(str) == team_abbr].copy()
+    if team_rows.empty:
+        return {
+            "committed_total":  0.0,
+            "n_contracts":      0,
+            "breakdown":        [],
+            "market_year":      market_year,
+            "coverage_caveat":  ("No contracts on file for this team in our "
+                                  "dataset. Real committed payroll is non-zero."),
+        }
+
+    team_rows["signed_year"] = pd.to_numeric(team_rows["signed_year"], errors="coerce")
+    team_rows["years"]       = pd.to_numeric(team_rows["years"],       errors="coerce")
+    team_rows["aav"]         = pd.to_numeric(team_rows["aav"],         errors="coerce")
+
+    # No-look-ahead: contract must have been signed on or before evaluation_year.
+    # Active-in-market_year: contract's final year (signed_year + years - 1) >=
+    # market_year, equivalently signed_year + years > market_year.
+    mask = (
+        (team_rows["signed_year"].fillna(9999) <= evaluation_year)
+        & ((team_rows["signed_year"].fillna(0) + team_rows["years"].fillna(0))
+            > market_year)
+        & team_rows["aav"].notna()
+    )
+    active = team_rows[mask].copy()
+    if active.empty:
+        return {
+            "committed_total":  0.0,
+            "n_contracts":      0,
+            "breakdown":        [],
+            "market_year":      market_year,
+            "coverage_caveat":  (f"No no-look-ahead contracts on file for "
+                                  f"{team_abbr} that extend into {market_year}. "
+                                  f"Real committed payroll is non-zero."),
+        }
+
+    active = active.sort_values("aav", ascending=False)
+    committed_total = float(active["aav"].sum())
+    breakdown = [
+        {
+            "player_name": str(r["player_name"]),
+            "position":    str(r.get("position", "")),
+            "aav":         int(r["aav"]) if pd.notna(r["aav"]) else None,
+            "signed_year": int(r["signed_year"]) if pd.notna(r["signed_year"]) else None,
+            "years":       int(r["years"])       if pd.notna(r["years"])       else None,
+        }
+        for _, r in active.iterrows()
+    ]
+    return {
+        "committed_total":  committed_total,
+        "n_contracts":      len(active),
+        "breakdown":        breakdown,
+        "market_year":      market_year,
+        "coverage_caveat":  (
+            f"Estimate from {len(active)} tracked contracts. Likely UNDER-COUNTS "
+            f"the team's true commitments — our contracts dataset excludes "
+            f"league-minimum, pre-arb, and many arb-eligible players."
+        ),
+    }
+
+
 def _compute_improvement_deltas(target: dict, incumbent: dict | None,
                                  gap: dict,
                                  oaa_df: pd.DataFrame | None = None,
@@ -1688,6 +1781,7 @@ def _pick_pricing_comparables(contracts: pd.DataFrame, batting: pd.DataFrame,
 def run_gap_filler_simple(team_abbr: str = "SEA",
                           max_budget: float = 165_000_000,
                           evaluation_year: int = 2024,
+                          committed_payroll: float | None = None,
                           progress: ProgressCallback = None) -> dict:
     """Sprint orchestrator. Returns the full structured output for the Gap Filler tab.
 
@@ -1805,10 +1899,31 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
     # instead of 12 × single-call latency. Brings the Gap Filler from ~12s
     # sequential to ~4-5s in practice.
     #
-    # Single-signing ceiling: assume one acquisition can claim at most 30% of the
-    # total payroll. This is a heuristic — see core/budget_manager.py in the full
-    # build for a proper committed-vs-flexible payroll calculation.
-    single_signing_ceiling = max_budget * 0.30
+    # Committed-vs-available payroll calculation. Previously this code took a
+    # shortcut: ``single_signing_ceiling = max_budget * 0.30``, treating the
+    # user's total-payroll input as if it were freely available. That's wrong
+    # for any real GM — most of the budget is already spoken for by existing
+    # contracts. We now compute the team's no-look-ahead committed payroll
+    # (from contracts.csv, with the same signed_year filter we use everywhere
+    # else), subtract from the total budget to get the available room, and
+    # set the single-signing ceiling = 30% of THAT.
+    #
+    # ``committed_payroll`` is a user override. Pass None (default) to use the
+    # auto-computed estimate from our contracts dataset. Pass a number to
+    # override — real GMs know their actual committed payroll better than our
+    # dataset does, since contracts.csv excludes league-min / pre-arb players.
+    _tick(f"Computing {team_abbr}'s committed-payroll baseline for {evaluation_year + 1}")
+    committed_info = compute_committed_payroll(team_abbr, contracts, evaluation_year)
+    if committed_payroll is None:
+        committed_payroll = float(committed_info["committed_total"])
+        committed_source  = "auto_estimate"
+    else:
+        committed_payroll = float(committed_payroll)
+        committed_source  = "user_override"
+
+    available_for_signings = max(0.0, max_budget - committed_payroll)
+    single_signing_ceiling = available_for_signings * 0.30
+    over_committed         = committed_payroll > max_budget
 
     # Try the embedding-based player matcher (Pipeline 04 → runtime). It uses
     # the ChromaDB vectorstore of player profiles to find semantically similar
@@ -2093,6 +2208,14 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         "evaluation_year": evaluation_year,
         "market_year": market_year,
         "max_budget": max_budget,
+        # Payroll situation (committed vs available, plus the data caveat)
+        "committed_payroll":      committed_payroll,
+        "committed_source":       committed_source,
+        "committed_breakdown":    committed_info["breakdown"],
+        "committed_caveat":       committed_info["coverage_caveat"],
+        "available_for_signings": available_for_signings,
+        "single_signing_ceiling": single_signing_ceiling,
+        "over_committed":         over_committed,
         "elapsed_seconds": round(time.time() - t0, 2),
         "team_batting":  team_bat,
         "team_pitching": team_pit,

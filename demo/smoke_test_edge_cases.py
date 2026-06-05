@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.orchestrator import (                                # noqa: E402
+    compute_committed_payroll,
     get_position_incumbent,
     list_team_starters,
     run_gap_filler_simple,
@@ -467,6 +468,84 @@ try:
               f"({leakage} rationales still cite unsupported deltas)")
 except Exception as e:                                          # noqa: BLE001
     _fail("incumbent-aware Gap Filler test crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
+# ── Test 11: Committed-vs-available payroll math ──────────────────────────
+# Previously the single-signing ceiling was 30% of TOTAL payroll. Now it's
+# 30% of (total - committed). This test verifies:
+#  (a) compute_committed_payroll returns sensible no-look-ahead numbers
+#  (b) Gap Filler honors the new ceiling -- no returned target's AAV exceeds it
+#  (c) User-provided committed override changes the ceiling as expected
+#  (d) Over-committed case (budget < committed) returns zero targets cleanly
+print("\n=== Test 11: Committed-vs-available payroll math ===")
+try:
+    import pandas as pd
+    main = pd.read_csv("data/raw/contracts.csv", encoding="utf-8")
+    ext  = pd.read_csv("data/raw/contracts_extended.csv", encoding="utf-8")
+    all_c = pd.concat([main, ext], ignore_index=True)
+
+    # 11a — sanity check the committed estimate for known team
+    sea = compute_committed_payroll("SEA", all_c, evaluation_year=2024)
+    if sea["committed_total"] > 0 and sea["n_contracts"] >= 3 and sea["market_year"] == 2025:
+        _ok(f"compute_committed_payroll('SEA', 2024) returns sane estimate",
+            f"(${sea['committed_total']/1e6:.1f}M from {sea['n_contracts']} contracts, "
+            f"market_year={sea['market_year']})")
+    else:
+        _fail("compute_committed_payroll('SEA', 2024) returned wrong shape",
+              str({k: v for k, v in sea.items() if k != "breakdown"}))
+
+    # 11b — Gap Filler honors the new ceiling (no target AAV > ceiling)
+    r = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024)
+    ceiling = r["single_signing_ceiling"]
+    expected_ceiling = max(0, (165_000_000 - r["committed_payroll"]) * 0.30)
+    if abs(ceiling - expected_ceiling) > 1.0:
+        _fail("ceiling math wrong",
+              f"got {ceiling:.1f}, expected {expected_ceiling:.1f}")
+    else:
+        violators = [t for g in r["gaps_results"] for t in g["targets"]
+                     if (t.get("aav") or 0) > ceiling]
+        if violators:
+            _fail("Gap Filler returned targets above the single-signing ceiling",
+                  f"({len(violators)} violators)")
+        else:
+            _ok("ceiling = 30% of (total - committed); no target AAV exceeds it",
+                f"(ceiling=${ceiling/1e6:.1f}M for $165M budget - "
+                f"${r['committed_payroll']/1e6:.1f}M committed)")
+
+    # 11c — User-provided committed override changes the ceiling
+    r_override = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024,
+                                        committed_payroll=120_000_000)
+    expected = (165_000_000 - 120_000_000) * 0.30
+    if abs(r_override["single_signing_ceiling"] - expected) > 1.0:
+        _fail("user override ignored",
+              f"override=$120M, ceiling expected ${expected/1e6:.1f}M, "
+              f"got ${r_override['single_signing_ceiling']/1e6:.1f}M")
+    elif r_override["committed_source"] != "user_override":
+        _fail("committed_source flag not set to user_override",
+              f"got {r_override['committed_source']!r}")
+    else:
+        _ok("user override changes the ceiling correctly",
+            f"(override=$120M -> ceiling=${r_override['single_signing_ceiling']/1e6:.1f}M)")
+
+    # 11d — Over-committed: budget < committed yields zero targets, no crash
+    r_over = run_gap_filler_simple("SEA", 40_000_000, evaluation_year=2024)
+    if not r_over.get("over_committed"):
+        _fail("over_committed flag not set when budget < committed",
+              f"got over_committed={r_over.get('over_committed')}")
+    elif r_over["single_signing_ceiling"] != 0:
+        _fail("ceiling != 0 in over-committed case",
+              f"got ${r_over['single_signing_ceiling']/1e6:.1f}M")
+    else:
+        total_targets = sum(len(g["targets"]) for g in r_over["gaps_results"])
+        if total_targets == 0:
+            _ok("over-committed case returns zero targets without crashing",
+                "(budget $40M < committed; over_committed=True; ceiling=$0)")
+        else:
+            _warn(f"over-committed case still returned {total_targets} targets",
+                  "(may be by design — vectorstore can surface candidates above ceiling)")
+except Exception as e:                                          # noqa: BLE001
+    _fail("payroll-math test crashed", f"{type(e).__name__}: {e}")
     traceback.print_exc()
 
 

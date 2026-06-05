@@ -1218,3 +1218,53 @@ The previous build's recommendations were already good. This build's recommendat
 Faster than estimated because the data scaffolding from Entry 25 was already in place — this entry was almost entirely defensive layers on top of an already-working flow.
 
 ---
+
+---
+
+## Entry 27 — June 4 (Final build): Committed-vs-available payroll math
+
+**The bug.** Up through Entry 26, the Gap Filler computed its single-signing ceiling as a flat 30% of the user's *total* payroll input. A user asking "what can SEA afford for FA?" with the default $165M would get a ceiling of $49.5M — as if the team had $165M of fresh cash, when in reality SEA already had ~$115M committed to existing players. The recommendations were therefore systematically too expensive: the tool was saying "you could sign Marcus Semien at $25M AAV" when the team actually had ~$50M of real room, not $165M.
+
+My own inline comment at line 1811 acknowledged this was a sprint shortcut: *"see core/budget_manager.py in the full build for a proper committed-vs-flexible payroll calculation."* User caught it during final-build review and asked for the fix.
+
+**The fix.**
+
+1. **New `compute_committed_payroll(team_abbr, contracts, evaluation_year)`** sums AAV for the team's contracts that are still active in `market_year = evaluation_year + 1`, with the **same no-look-ahead discipline** we already enforce everywhere else — contracts signed after `evaluation_year` are excluded. Returns the total, the contract count, a per-contract breakdown sorted by AAV for transparency, and an explicit coverage caveat.
+
+2. **`run_gap_filler_simple` ceiling rewrite** —
+   - `committed_payroll = compute_committed_payroll(...).committed_total` (when user doesn't override)
+   - `available_for_signings = max(0, max_budget - committed_payroll)`
+   - `single_signing_ceiling = available_for_signings * 0.30`  *(was `max_budget * 0.30`)*
+
+3. **User override.** New `committed_payroll: float | None = None` parameter. Real GMs know their committed payroll better than our contracts dataset does — the override lets them substitute reality. The result dict carries `committed_source: "auto_estimate" | "user_override"` so the UI can label it.
+
+4. **UI** — `app/tabs/gap_filler.py`:
+   - New third input field (`Committed payroll`) pre-filled from the auto-computed estimate, editable.
+   - Live preview of the math under the inputs: `Committed $X · Available $Y · Single-signing ceiling $Z`.
+   - Validation: if committed > total budget, surfaces an error and warns the user that zero targets will be returned.
+   - **Payroll Situation panel** in the result section: 4 st.metric tiles (Total / Committed / Available / Ceiling) + an expander listing the tracked contracts that contributed.
+
+5. **Honest caveat surfaced everywhere.** The result dict and the UI both include the coverage caveat: *"Estimate from N tracked contracts. Likely UNDER-COUNTS the team's true commitments — our contracts dataset excludes league-minimum, pre-arb, and many arb-eligible players."* For SEA the auto-estimate is ~$51M but the real 2025 committed payroll is closer to ~$115M. The user is told to override with their own number for accurate recommendations.
+
+**Verification.**
+
+| Team | Budget | Committed (auto) | Available | Ceiling | Max target AAV returned | Under ceiling? |
+|---|---|---|---|---|---|---|
+| SEA | $165M | $51M | $114M | $34.2M | $25.5M | ✓ |
+| SEA (user override $120M) | $165M | $120M | $45M | $13.5M | $12.5M | ✓ |
+| SEA (over-committed) | $40M | $51M | $0 | $0 | (0 targets) | ✓ |
+
+The recommendations now meaningfully constrain to what the team can actually afford. The SEA $25.5M-AAV target (Semien) clears the new $34.2M ceiling, but if you set committed=$120M reflecting reality, the ceiling drops to $13.5M and Semien is filtered out (correctly — SEA can't actually afford him as a free agent in 2025).
+
+**Smoke suite extended.** Test 11 (4 sub-checks): `compute_committed_payroll` shape, ceiling math invariant (no returned target's AAV exceeds ceiling), user override works, over-committed graceful fallback. **Full suite: 23 passed · 1 warned · 0 failed.**
+
+**Time: ~45 minutes.**
+
+**Why this matters.** The previous output was technically a valid recommendation in a vacuum, but no GM would have taken the tool seriously after one click — the math obviously didn't account for existing payroll commitments. This entry turns the recommendation from "directionally interesting" into "actually usable in a budget meeting."
+
+**Updated artifacts:**
+- `core/orchestrator.py` — new `compute_committed_payroll` helper, `run_gap_filler_simple` ceiling rewrite, result-dict additions (`committed_payroll`, `committed_source`, `committed_breakdown`, `committed_caveat`, `available_for_signings`, `over_committed`)
+- `app/tabs/gap_filler.py` — third input field + live preview + Payroll Situation panel
+- `demo/smoke_test_edge_cases.py` — Test 11
+
+---

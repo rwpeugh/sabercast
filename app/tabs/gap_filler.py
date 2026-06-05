@@ -9,11 +9,37 @@ from __future__ import annotations
 import plotly.graph_objects as go
 import streamlit as st
 
+from pathlib import Path
+
+import pandas as pd
+
 from core.orchestrator import (
     TEAM_ABBR_TO_BREF,
     TEAM_DEFAULT_PAYROLL,
+    compute_committed_payroll,
     run_gap_filler_simple,
 )
+
+
+@st.cache_data(show_spinner=False)
+def _load_combined_contracts() -> pd.DataFrame:
+    """Loads contracts.csv + contracts_extended.csv once per session. Cheap
+    enough to load eagerly so the UI can show the committed-payroll estimate
+    before the user clicks Diagnose."""
+    root = Path(__file__).resolve().parents[2] / "data" / "raw"
+    main = pd.read_csv(root / "contracts.csv", encoding="utf-8")
+    ext_path = root / "contracts_extended.csv"
+    if ext_path.exists():
+        ext = pd.read_csv(ext_path, encoding="utf-8")
+        return pd.concat([main, ext], ignore_index=True)
+    return main
+
+
+@st.cache_data(show_spinner=False)
+def _committed_estimate(team_abbr: str, evaluation_year: int) -> dict:
+    """Cached wrapper around compute_committed_payroll for the UI."""
+    contracts = _load_combined_contracts()
+    return compute_committed_payroll(team_abbr, contracts, evaluation_year)
 
 
 def _get_cache() -> dict:
@@ -150,8 +176,8 @@ def render() -> None:
     evaluation_year = 2024
     teams_sorted = sorted(TEAM_ABBR_TO_BREF.keys())
 
-    # ── Inputs row: team selector + editable payroll ─────────────────────────
-    col1, col2, col3 = st.columns([1, 1, 2])
+    # ── Inputs row: team selector + editable payroll fields ─────────────────
+    col1, col2, col3 = st.columns([1, 1, 1])
     with col1:
         team = st.selectbox(
             "Team",
@@ -160,16 +186,54 @@ def render() -> None:
             help="Pick any of the 30 MLB teams. The diagnosis pulls their 2024 roster aggregates.",
         )
     with col2:
-        st.markdown("**Scouting as of**")
-        st.markdown(f"end of **{evaluation_year}**")
-    with col3:
         default_budget = TEAM_DEFAULT_PAYROLL.get(team, 165_000_000)
         budget = st.number_input(
-            f"Max payroll for {evaluation_year + 1} (USD)",
+            f"Total payroll budget for {evaluation_year + 1} (USD)",
             min_value=50_000_000, max_value=500_000_000,
             value=default_budget, step=5_000_000,
-            help="Pre-filled with an approximate 2025 payroll for the selected team. Override to model a different scenario.",
+            help=(
+                "Pre-filled with an approximate 2025 payroll for the selected "
+                "team. This is your TOTAL budget — the tool subtracts existing "
+                "committed contracts to compute room for new signings."
+            ),
         )
+
+    # Auto-computed committed estimate from contracts.csv (no-look-ahead).
+    committed_info = _committed_estimate(team, evaluation_year)
+    auto_committed = int(committed_info["committed_total"])
+    n_known        = committed_info["n_contracts"]
+
+    with col3:
+        committed_override = st.number_input(
+            f"Committed payroll for {evaluation_year + 1} (USD)",
+            min_value=0, max_value=500_000_000,
+            value=auto_committed, step=1_000_000,
+            help=(
+                "Pre-filled from our tracked-contracts dataset (no-look-ahead). "
+                "Likely UNDER-COUNTS the team's actual commitments because the "
+                "dataset excludes league-minimum and pre-arb players. Override "
+                "with your own estimate for sharper recommendations — the "
+                "single-signing ceiling is computed as 30% of "
+                "(total budget - committed)."
+            ),
+        )
+
+    available_preview = max(0, int(budget) - int(committed_override))
+    ceiling_preview   = int(available_preview * 0.30)
+
+    payroll_caption = (
+        f"**Committed:** ${auto_committed/1e6:,.1f}M from {n_known} tracked "
+        f"contracts  ·  **Available:** ${available_preview/1e6:,.1f}M  ·  "
+        f"**Single-signing ceiling:** ${ceiling_preview/1e6:,.1f}M (30% of available)"
+    )
+    if int(committed_override) > int(budget):
+        st.error(
+            f"Committed payroll (${int(committed_override)/1e6:,.1f}M) exceeds "
+            f"total budget (${int(budget)/1e6:,.1f}M). The tool will return "
+            f"zero affordable targets. Adjust either field."
+        )
+    else:
+        st.caption(payroll_caption)
 
     st.caption(
         f"Comparable contracts are filtered to signings on or before "
@@ -180,7 +244,9 @@ def render() -> None:
     # ── Run trigger with progressive status + session-scoped caching ────────
     if st.button("Diagnose roster gaps", type="primary"):
         cache = _get_cache()
-        cache_key = (team, int(budget), evaluation_year)
+        # Cache key includes the committed override so different
+        # payroll-situation scenarios don't collide.
+        cache_key = (team, int(budget), int(committed_override), evaluation_year)
 
         if cache_key in cache:
             result = cache[cache_key]
@@ -197,7 +263,9 @@ def render() -> None:
 
                 result = run_gap_filler_simple(
                     team_abbr=team, max_budget=int(budget),
-                    evaluation_year=evaluation_year, progress=progress,
+                    evaluation_year=evaluation_year,
+                    committed_payroll=int(committed_override),
+                    progress=progress,
                 )
                 n_target_calls = sum(len(g.get("targets") or []) for g in result["gaps_results"])
                 status.update(
@@ -216,6 +284,54 @@ def render() -> None:
         st.info("Click *Diagnose roster gaps* to run the analysis. "
                 "Typical end-to-end: 8–15 seconds (LLM calls run in parallel).")
         return
+
+    # ── Payroll situation panel ───────────────────────────────────────────────
+    # Surfaces how the single-signing ceiling was actually computed:
+    #   total_budget - committed = available; ceiling = 30% of available.
+    # The user can see WHY a given AAV target is or isn't eligible.
+    payroll_total      = result.get("max_budget", 0)
+    payroll_committed  = result.get("committed_payroll", 0)
+    payroll_available  = result.get("available_for_signings", 0)
+    payroll_ceiling    = result.get("single_signing_ceiling", 0)
+    payroll_source     = result.get("committed_source", "auto_estimate")
+    payroll_caveat     = result.get("committed_caveat", "")
+    payroll_breakdown  = result.get("committed_breakdown") or []
+    over_committed     = result.get("over_committed", False)
+
+    st.markdown("### Payroll situation")
+    p1, p2, p3, p4 = st.columns(4)
+    with p1:
+        st.metric("Total budget",   f"${payroll_total/1e6:,.1f}M")
+    with p2:
+        st.metric("Committed",      f"${payroll_committed/1e6:,.1f}M",
+                  help=("Source: " + ("user override" if payroll_source == "user_override"
+                                       else f"auto-computed from {len(payroll_breakdown)} tracked contracts")))
+    with p3:
+        st.metric("Available room", f"${payroll_available/1e6:,.1f}M")
+    with p4:
+        st.metric("Single-signing ceiling", f"${payroll_ceiling/1e6:,.1f}M",
+                  help="30% of available room. Targets above this AAV are filtered out.")
+    if over_committed:
+        st.error(
+            "Committed payroll exceeds total budget — zero affordable targets "
+            "returned. Increase the budget or lower the committed override."
+        )
+    if payroll_caveat and payroll_source == "auto_estimate":
+        st.caption(f"_{payroll_caveat}_")
+    if payroll_breakdown:
+        with st.expander(f"View the {len(payroll_breakdown)} tracked contracts that make up committed payroll"):
+            rows = [
+                {
+                    "Player":      b.get("player_name"),
+                    "Position":    b.get("position"),
+                    "AAV":         _html_money(b.get("aav")),
+                    "Signed":      b.get("signed_year"),
+                    "Years":       b.get("years"),
+                    "Expires after": (b.get("signed_year") or 0) + (b.get("years") or 0) - 1,
+                }
+                for b in payroll_breakdown
+            ]
+            st.dataframe(rows, hide_index=True, use_container_width=True)
 
     # ── Roster summary + delta chart side by side ────────────────────────────
     st.markdown("### Roster summary")
