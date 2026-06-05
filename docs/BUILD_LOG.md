@@ -1268,3 +1268,85 @@ The recommendations now meaningfully constrain to what the team can actually aff
 - `demo/smoke_test_edge_cases.py` — Test 11
 
 ---
+
+---
+
+## Entry 28 — June 4 (Final build): Spotrac team-payroll scrape (Option A)
+
+**The follow-on to Entry 27.** Entry 27 fixed the ceiling math (`available = total − committed; ceiling = 30% × available`), but the auto-computed `committed` was sourced from summing contracts.csv — which captures only ~25-30% of each team's roster. For SEA the auto-estimate was $51M when the real figure was ~$166M. The math was right but the inputs were off by 60-70%.
+
+Entry 28 fixes the inputs by pulling Spotrac's authoritative per-team payroll totals.
+
+### The pipeline
+
+**`pipelines/02d_pull_team_payrolls.py`** scrapes `spotrac.com/mlb/<team-slug>/payroll/_/year/<YYYY>/` for all 30 teams. Each page renders sections labelled "YYYY Active Roster Payroll" and "YYYY Retained Payroll" next to dollar figures; we extract both via regex on the rendered page text, sum them into a single committed figure, and save to `data/raw/team_payrolls_<year>.csv`.
+
+**Output (2025):**
+
+| Top 5 teams | Committed | | Bottom 5 teams | Committed |
+|---|---|---|---|---|
+| LAD | $350.0M | | MIA | $67.8M |
+| NYM | $342.3M | | OAK | $78.4M |
+| NYY | $309.1M | | CWS | $80.0M |
+| PHI | $295.3M | | PIT | $84.4M |
+| TOR | $255.2M | | TB | $89.6M |
+
+All 30 teams pulled cleanly in one go. SEA: $166.3M (was $51M in the contracts-sum estimate). LAD: $350.0M (was $216M). OAK: $78.4M (was $0 — no qualifying contracts in our dataset at all).
+
+### Orchestrator change
+
+`compute_committed_payroll(team, contracts, evaluation_year)` now follows a source preference:
+
+1. **`data/raw/team_payrolls_<market_year>.csv`** (Spotrac, preferred). Authoritative whole-roster total. Returns the figure with `committed_source = "spotrac_team_payroll"`.
+2. **Sum of contracts.csv rows** with no-look-ahead filter (fallback). Used when the Spotrac CSV is missing or doesn't carry this team. Returns the partial estimate with `committed_source = "contracts_sum"` and the appropriate UNDER-COUNTS caveat.
+
+Both paths emit a `committed_source` field so downstream callers (UI label, smoke test) can render the right context.
+
+### UI change
+
+The "Committed" metric tile in `app/tabs/gap_filler.py` now shows source-aware help text:
+
+- `spotrac_team_payroll` → *"Source: Spotrac team payroll page (authoritative)"*
+- `contracts_sum` → *"Source: sum of N tracked contracts (likely under-counts)"*
+- `user_override` → *"Source: user override"*
+
+The caveat below the metrics is also source-aware — for the Spotrac path it explicitly names "no estimation required" instead of dwelling on the dataset coverage gap.
+
+### Real impact on recommendations
+
+**SEA at $180M budget:**
+- Before (contracts-sum): committed $51M → available $129M → ceiling $38.7M → tool would recommend players up to $38.7M AAV
+- After (Spotrac): committed $166.3M → available $13.7M → ceiling $4.1M → tool correctly returns only sub-$4M players
+
+That's the difference between a recommendation a GM would dismiss in one click ("you're telling me to spend $38M when I have $14M of room?") and one they'd actually act on.
+
+### Smoke suite extended
+
+**Test 11 grew from 4 → 5 sub-checks:**
+- 11a: auto-estimate sanity (now source-aware: accepts either path)
+- 11b: ceiling math invariant (budget raised to $250M so SEA isn't trivially over-committed)
+- 11c: user override works
+- 11d: over-committed graceful fallback
+- 11e: **NEW** — verifies the Spotrac source is actually preferred when the CSV is present
+
+Test 10 (incumbent-aware composite) also got a budget bump from $165M → $250M for the same reason (its SEA test path was relying on the old under-counted committed estimate to leave room).
+
+**Full suite: 24 passed · 0 warned · 0 failed.**
+
+### Honest limits
+
+- The Spotrac scrape is current-year (2025). Historical backtests (running an `evaluation_year=2021` analysis in 2026) would need vintage payroll snapshots. The pipeline supports `python pipelines/02d_pull_team_payrolls.py 2022` for that, but we haven't pulled the historical years yet.
+- Spotrac's HTML structure could change. The regex is targeted at a specific text pattern ("$N\n YYYY Active Roster Payroll") that's been stable for years, but if Spotrac restructures we'd need to update the parser.
+- "Retained Payroll" is small for most teams ($0-$5M) but we add it to `committed_total` because it's money truly committed to past obligations that can't be redirected to new signings.
+
+### Updated artifacts
+
+- `pipelines/02d_pull_team_payrolls.py` — NEW: scrapes all 30 team payroll pages
+- `data/raw/team_payrolls_2025.csv` — NEW: 30 teams × (team_abbr, active_payroll, retained_payroll, committed_total, source_url, snapshot_date)
+- `core/orchestrator.py` — `compute_committed_payroll` source-preference rewrite; result-dict `committed_source` now carried through cleanly
+- `app/tabs/gap_filler.py` — source-aware "Committed" metric tile + caveat
+- `demo/smoke_test_edge_cases.py` — Test 11e (Spotrac-source preferred), Test 10/11 budget bumps
+
+**Time: ~50 minutes.**
+
+---

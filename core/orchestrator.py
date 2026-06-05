@@ -487,28 +487,65 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
     """Estimate the team's committed payroll for the upcoming season
     (``market_year = evaluation_year + 1``).
 
-    Sums AAV for contracts where the player is on this team AND the contract
-    was signed on or before ``evaluation_year`` AND the contract is still
-    active in ``market_year`` (i.e., ``signed_year + years > market_year``).
+    Source preference (best -> worst):
+      1. ``data/raw/team_payrolls_<market_year>.csv`` -- Spotrac's authoritative
+         per-team total, pulled by ``pipelines/02d_pull_team_payrolls.py``.
+         Includes every player on the active roster + retained payroll. This
+         is the correct number to use whenever it's available.
+      2. Sum of contracts.csv rows for the team where the contract was signed
+         on or before ``evaluation_year`` AND is still active in ``market_year``.
+         Used as a fallback when the team_payrolls CSV is missing. Skews to
+         high-AAV signings and under-counts reality by ~50-60% because the
+         contracts dataset misses league-minimum / pre-arb players.
 
     Returns a dict carrying:
-      * ``committed_total``  -- USD sum of qualifying AAVs
-      * ``n_contracts``      -- count of contracts that qualified
-      * ``breakdown``        -- list of {player_name, position, aav, signed_year, years}
-                                sorted by AAV desc, for transparency in the UI
-      * ``market_year``      -- the year we're projecting committed payroll INTO
-      * ``coverage_caveat``  -- one-line note that our contracts dataset doesn't
-                                cover league-minimum / pre-arb players, so this
-                                figure UNDER-COUNTS reality
+      * ``committed_total``    -- USD total
+      * ``committed_source``   -- "spotrac_team_payroll" | "contracts_sum"
+      * ``n_contracts``        -- (only set for contracts_sum) count that qualified
+      * ``breakdown``          -- (only set for contracts_sum) per-contract list
+                                  for UI transparency
+      * ``market_year``        -- the year being projected INTO
+      * ``coverage_caveat``    -- one-line note appropriate to the source
 
-    NOTE on no-look-ahead. We filter ``signed_year <= evaluation_year`` so a
-    historical backtest doesn't leak future signings into the committed
-    payroll. This is the same discipline applied to the candidate-pool filter.
+    No-look-ahead. The contracts-sum path filters ``signed_year <= evaluation_year``
+    so historical backtests don't leak future signings into the committed payroll.
+    The team_payrolls path is by definition current-year; for historical
+    evaluation_years (running a 2022 backtest in 2026), prefer the contracts-sum
+    path or pull a vintage team_payrolls_<year>.csv via the pipeline.
     """
     market_year = evaluation_year + 1
+
+    # ── Source 1: Spotrac team-payroll total (preferred) ─────────────────
+    team_payrolls_path = DATA_RAW / f"team_payrolls_{market_year}.csv"
+    if team_payrolls_path.exists():
+        try:
+            tp_df = pd.read_csv(team_payrolls_path, encoding="utf-8")
+            row = tp_df[tp_df["team_abbr"].astype(str) == team_abbr]
+            if not row.empty:
+                committed = float(row.iloc[0]["committed_total"])
+                if committed > 0:
+                    snap_date = str(row.iloc[0].get("snapshot_date", ""))
+                    return {
+                        "committed_total":   committed,
+                        "committed_source":  "spotrac_team_payroll",
+                        "n_contracts":       None,
+                        "breakdown":         [],
+                        "market_year":       market_year,
+                        "coverage_caveat":   (
+                            f"Sourced from Spotrac's {team_abbr} team payroll page "
+                            f"({snap_date}). Includes the full active roster plus "
+                            f"retained payroll. This is the authoritative committed "
+                            f"figure -- no estimation required."
+                        ),
+                    }
+        except Exception:                                       # noqa: BLE001
+            pass  # fall through to contracts-sum
+
+    # ── Source 2: sum contracts.csv (fallback) ──────────────────────────
     if contracts is None or contracts.empty:
         return {
             "committed_total":  0.0,
+            "committed_source": "contracts_sum",
             "n_contracts":      0,
             "breakdown":        [],
             "market_year":      market_year,
@@ -518,11 +555,14 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
     if team_rows.empty:
         return {
             "committed_total":  0.0,
+            "committed_source": "contracts_sum",
             "n_contracts":      0,
             "breakdown":        [],
             "market_year":      market_year,
             "coverage_caveat":  ("No contracts on file for this team in our "
-                                  "dataset. Real committed payroll is non-zero."),
+                                  "dataset. Real committed payroll is non-zero. "
+                                  "Run pipelines/02d_pull_team_payrolls.py for "
+                                  "the authoritative Spotrac figure."),
         }
 
     team_rows["signed_year"] = pd.to_numeric(team_rows["signed_year"], errors="coerce")
@@ -542,12 +582,15 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
     if active.empty:
         return {
             "committed_total":  0.0,
+            "committed_source": "contracts_sum",
             "n_contracts":      0,
             "breakdown":        [],
             "market_year":      market_year,
             "coverage_caveat":  (f"No no-look-ahead contracts on file for "
                                   f"{team_abbr} that extend into {market_year}. "
-                                  f"Real committed payroll is non-zero."),
+                                  f"Real committed payroll is non-zero. Run "
+                                  f"pipelines/02d_pull_team_payrolls.py for the "
+                                  f"authoritative Spotrac figure."),
         }
 
     active = active.sort_values("aav", ascending=False)
@@ -564,13 +607,15 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
     ]
     return {
         "committed_total":  committed_total,
+        "committed_source": "contracts_sum",
         "n_contracts":      len(active),
         "breakdown":        breakdown,
         "market_year":      market_year,
         "coverage_caveat":  (
             f"Estimate from {len(active)} tracked contracts. Likely UNDER-COUNTS "
             f"the team's true commitments — our contracts dataset excludes "
-            f"league-minimum, pre-arb, and many arb-eligible players."
+            f"league-minimum, pre-arb, and many arb-eligible players. Run "
+            f"pipelines/02d_pull_team_payrolls.py for the authoritative figure."
         ),
     }
 
@@ -1916,7 +1961,11 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
     committed_info = compute_committed_payroll(team_abbr, contracts, evaluation_year)
     if committed_payroll is None:
         committed_payroll = float(committed_info["committed_total"])
-        committed_source  = "auto_estimate"
+        # Source is now resolved inside compute_committed_payroll: it's either
+        # "spotrac_team_payroll" (authoritative) or "contracts_sum" (estimate
+        # from the partial contracts dataset). The UI tile labels itself
+        # accordingly.
+        committed_source  = committed_info["committed_source"]
     else:
         committed_payroll = float(committed_payroll)
         committed_source  = "user_override"

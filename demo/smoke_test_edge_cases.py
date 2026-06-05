@@ -382,8 +382,10 @@ try:
         _ok("get_position_incumbent shape correct for 2B/C/SP/DH",
             "(2B=Polanco offense, C=Raleigh defense, SP=Gilbert pitching, DH=None)")
 
-    # 10b — Gap Filler result carries incumbent + per-target deltas
-    r = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024)
+    # 10b — Gap Filler result carries incumbent + per-target deltas.
+    # Use $250M so SEA's real ~$166M Spotrac-sourced committed leaves
+    # meaningful available room (otherwise the test trivially returns 0 targets).
+    r = run_gap_filler_simple("SEA", 250_000_000, evaluation_year=2024)
     gaps = r["gaps_results"]
     has_incumbent = sum(1 for g in gaps if g.get("incumbent"))
     has_deltas = sum(
@@ -473,8 +475,10 @@ except Exception as e:                                          # noqa: BLE001
 
 # ── Test 11: Committed-vs-available payroll math ──────────────────────────
 # Previously the single-signing ceiling was 30% of TOTAL payroll. Now it's
-# 30% of (total - committed). This test verifies:
-#  (a) compute_committed_payroll returns sensible no-look-ahead numbers
+# 30% of (total - committed). Committed is sourced from either Spotrac's
+# team-payroll page (preferred, via team_payrolls_<year>.csv) or summed from
+# contracts.csv (fallback). This test verifies:
+#  (a) compute_committed_payroll returns sensible numbers (both source paths)
 #  (b) Gap Filler honors the new ceiling -- no returned target's AAV exceeds it
 #  (c) User-provided committed override changes the ceiling as expected
 #  (d) Over-committed case (budget < committed) returns zero targets cleanly
@@ -487,18 +491,25 @@ try:
 
     # 11a — sanity check the committed estimate for known team
     sea = compute_committed_payroll("SEA", all_c, evaluation_year=2024)
-    if sea["committed_total"] > 0 and sea["n_contracts"] >= 3 and sea["market_year"] == 2025:
+    is_spotrac = sea.get("committed_source") == "spotrac_team_payroll"
+    # Spotrac source: ~$166M for SEA. Contracts-sum fallback: ~$51M. Both > 0.
+    expected_min = 100_000_000 if is_spotrac else 30_000_000
+    if sea["committed_total"] >= expected_min and sea["market_year"] == 2025:
         _ok(f"compute_committed_payroll('SEA', 2024) returns sane estimate",
-            f"(${sea['committed_total']/1e6:.1f}M from {sea['n_contracts']} contracts, "
+            f"(${sea['committed_total']/1e6:.1f}M, source={sea['committed_source']}, "
             f"market_year={sea['market_year']})")
     else:
         _fail("compute_committed_payroll('SEA', 2024) returned wrong shape",
               str({k: v for k, v in sea.items() if k != "breakdown"}))
 
-    # 11b — Gap Filler honors the new ceiling (no target AAV > ceiling)
-    r = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024)
+    # 11b — Gap Filler honors the new ceiling (no target AAV > ceiling).
+    # Use a generous $250M budget so SEA's ~$166M Spotrac committed leaves
+    # meaningful room (otherwise SEA goes over-committed and we get 0 targets
+    # which is a tautology for the ceiling check).
+    test_budget = 250_000_000
+    r = run_gap_filler_simple("SEA", test_budget, evaluation_year=2024)
     ceiling = r["single_signing_ceiling"]
-    expected_ceiling = max(0, (165_000_000 - r["committed_payroll"]) * 0.30)
+    expected_ceiling = max(0, (test_budget - r["committed_payroll"]) * 0.30)
     if abs(ceiling - expected_ceiling) > 1.0:
         _fail("ceiling math wrong",
               f"got {ceiling:.1f}, expected {expected_ceiling:.1f}")
@@ -510,7 +521,7 @@ try:
                   f"({len(violators)} violators)")
         else:
             _ok("ceiling = 30% of (total - committed); no target AAV exceeds it",
-                f"(ceiling=${ceiling/1e6:.1f}M for $165M budget - "
+                f"(ceiling=${ceiling/1e6:.1f}M for ${test_budget/1e6:.0f}M budget - "
                 f"${r['committed_payroll']/1e6:.1f}M committed)")
 
     # 11c — User-provided committed override changes the ceiling
@@ -544,6 +555,16 @@ try:
         else:
             _warn(f"over-committed case still returned {total_targets} targets",
                   "(may be by design — vectorstore can surface candidates above ceiling)")
+
+    # 11e — Spotrac source preferred over contracts-sum when available
+    if sea.get("committed_source") == "spotrac_team_payroll":
+        _ok(f"Spotrac team-payroll source preferred over contracts-sum",
+            f"(SEA committed=${sea['committed_total']/1e6:.1f}M from Spotrac, "
+            f"vs ~$51M if summed from contracts.csv)")
+    else:
+        _warn("Spotrac team-payroll CSV not in use",
+              f"(fell back to {sea.get('committed_source')!r} -- run "
+              f"pipelines/02d_pull_team_payrolls.py to enable)")
 except Exception as e:                                          # noqa: BLE001
     _fail("payroll-math test crashed", f"{type(e).__name__}: {e}")
     traceback.print_exc()

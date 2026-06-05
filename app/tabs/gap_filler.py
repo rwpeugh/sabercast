@@ -303,9 +303,13 @@ def render() -> None:
     with p1:
         st.metric("Total budget",   f"${payroll_total/1e6:,.1f}M")
     with p2:
+        source_label = {
+            "user_override":         "user override",
+            "spotrac_team_payroll":  "Spotrac team payroll page (authoritative)",
+            "contracts_sum":         f"sum of {len(payroll_breakdown)} tracked contracts (likely under-counts)",
+        }.get(payroll_source, payroll_source or "unknown")
         st.metric("Committed",      f"${payroll_committed/1e6:,.1f}M",
-                  help=("Source: " + ("user override" if payroll_source == "user_override"
-                                       else f"auto-computed from {len(payroll_breakdown)} tracked contracts")))
+                  help=f"Source: {source_label}")
     with p3:
         st.metric("Available room", f"${payroll_available/1e6:,.1f}M")
     with p4:
@@ -316,7 +320,7 @@ def render() -> None:
             "Committed payroll exceeds total budget — zero affordable targets "
             "returned. Increase the budget or lower the committed override."
         )
-    if payroll_caveat and payroll_source == "auto_estimate":
+    if payroll_caveat and payroll_source != "user_override":
         st.caption(f"_{payroll_caveat}_")
     if payroll_breakdown:
         with st.expander(f"View the {len(payroll_breakdown)} tracked contracts that make up committed payroll"):
