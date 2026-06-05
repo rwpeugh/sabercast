@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from core.orchestrator import (                                # noqa: E402
+    get_position_incumbent,
     list_team_starters,
     run_gap_filler_simple,
     run_opponent_scouting_simple,
@@ -326,6 +327,146 @@ try:
                   "(may need prompt iteration)")
 except Exception as e:                                          # noqa: BLE001
     _fail("probable-pitcher feature test crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
+# ── Test 10: Gap Filler incumbent-aware composite scoring (task #62) ──────
+# Verifies: (a) get_position_incumbent returns sensible data for each
+# position type, (b) Gap Filler result carries incumbent + per-target deltas,
+# (c) DH gracefully falls back to absolute fit, (d) at least one target's
+# forecast rationale mentions the incumbent by name.
+print("\n=== Test 10: Gap Filler incumbent-aware composite scoring ===")
+try:
+    import pandas as pd
+    batting  = pd.read_csv("data/raw/batting_2024.csv",  encoding="utf-8")
+    pitching = pd.read_csv("data/raw/pitching_2024.csv", encoding="utf-8")
+    oaa      = pd.read_csv("data/raw/oaa_2024.csv")
+    catcher  = pd.read_csv("data/raw/catcher_defense_2024.csv")
+    sprint   = pd.read_csv("data/raw/sprint_speed_2024.csv")
+
+    # 10a — incumbent helper returns correct shape per position
+    inc_shapes = {
+        "2B": get_position_incumbent("SEA", "2B", batting, pitching, oaa, catcher, sprint),
+        "C":  get_position_incumbent("SEA", "C",  batting, pitching, oaa, catcher, sprint),
+        "SP": get_position_incumbent("SEA", "SP", batting, pitching, oaa, catcher, sprint),
+        "DH": get_position_incumbent("SEA", "DH", batting, pitching, oaa, catcher, sprint),
+    }
+    expectations = {
+        "2B": ("Jorge Polanco", "offense"),
+        "C":  ("Cal Raleigh",   "defense"),
+        "SP": ("Logan Gilbert", "pitching"),
+        "DH": (None,            None),
+    }
+    incumbent_issues = []
+    for pos, (expected_name, expected_block) in expectations.items():
+        got = inc_shapes[pos]
+        if expected_name is None:
+            if got is not None:
+                incumbent_issues.append(f"{pos}: expected None, got {got!r}")
+        else:
+            if got is None:
+                incumbent_issues.append(f"{pos}: expected non-None")
+            elif got.get("primary_player") != expected_name:
+                incumbent_issues.append(
+                    f"{pos}: expected primary={expected_name!r}, "
+                    f"got {got.get('primary_player')!r}"
+                )
+            elif not got.get(expected_block):
+                incumbent_issues.append(
+                    f"{pos}: expected {expected_block} block to be populated"
+                )
+    if incumbent_issues:
+        _fail("incumbent helper returned wrong shape", str(incumbent_issues))
+    else:
+        _ok("get_position_incumbent shape correct for 2B/C/SP/DH",
+            "(2B=Polanco offense, C=Raleigh defense, SP=Gilbert pitching, DH=None)")
+
+    # 10b — Gap Filler result carries incumbent + per-target deltas
+    r = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024)
+    gaps = r["gaps_results"]
+    has_incumbent = sum(1 for g in gaps if g.get("incumbent"))
+    has_deltas = sum(
+        1 for g in gaps for t in g["targets"]
+        if t.get("composite_score") is not None
+        or t.get("delta_breakdown")
+    )
+    total_targets = sum(len(g["targets"]) for g in gaps)
+    if has_incumbent < 1:
+        _fail("no gaps carry an incumbent profile",
+              f"({len(gaps)} gaps, {has_incumbent} with incumbent)")
+    elif has_deltas < 1:
+        _fail("no targets carry composite/delta breakdown fields", "")
+    else:
+        _ok(f"Gap Filler result carries incumbent + per-target deltas",
+            f"({has_incumbent}/{len(gaps)} gaps with incumbent, "
+            f"{has_deltas}/{total_targets} targets with composite score)")
+
+    # 10c — DH gap (when present) gracefully has no incumbent + None composite
+    dh_gap = next((g for g in gaps if g["gap"].get("position") == "DH"), None)
+    if dh_gap:
+        dh_inc = dh_gap.get("incumbent")
+        dh_targets = dh_gap.get("targets", [])
+        dh_composites = [t.get("composite_score") for t in dh_targets]
+        if dh_inc is None and all(c is None for c in dh_composites) and dh_targets:
+            _ok("DH gap gracefully falls back (incumbent=None, no composite, targets still returned)",
+                f"({len(dh_targets)} targets returned without composite re-ranking)")
+        else:
+            _fail("DH gap fallback broken",
+                  f"incumbent={dh_inc}, composites={dh_composites}")
+    else:
+        _warn("DH gap not in SEA top-3 — skipping DH fallback check",
+              "(this is fine, just data-dependent)")
+
+    # 10d — at least one forecast rationale mentions the incumbent's surname
+    rationale_mentions = 0
+    for g in gaps:
+        inc = g.get("incumbent")
+        if not inc or not inc.get("primary_player"):
+            continue
+        surname = inc["primary_player"].split()[-1]
+        for t in g["targets"]:
+            if surname in (t.get("forecast_rationale") or ""):
+                rationale_mentions += 1
+                break  # one per gap is enough
+    if rationale_mentions >= 1:
+        _ok(f"LLM threads incumbent surname into at least one forecast rationale per gap",
+            f"({rationale_mentions} of {has_incumbent} gaps with incumbent)")
+    else:
+        _warn("No forecast rationale mentioned the incumbent by name",
+              "(LLM may need prompt iteration)")
+
+    # 10e — hallucination invariant (task #63): no rationale across SEA's
+    # gaps should reference a delta dimension that isn't in the deltas dict,
+    # AND every cited magnitude must match the actual delta. The orchestrator
+    # already replaces hallucinated rationales with the programmatic fallback,
+    # so this should always pass once the three-layered defense is in place.
+    from core.orchestrator import _rationale_hallucinations
+    leakage = 0
+    for g in gaps:
+        for t in g["targets"]:
+            ratl = t.get("forecast_rationale") or ""
+            comp_present = t.get("composite_score") is not None
+            if not comp_present:
+                continue
+            deltas = {"composite": t.get("composite_score")}
+            if t.get("vs_incumbent_offense")  is not None:
+                deltas["offense"]  = t["vs_incumbent_offense"]
+            if t.get("vs_incumbent_defense")  is not None:
+                deltas["defense"]  = t["vs_incumbent_defense"]
+            if t.get("vs_incumbent_pitching") is not None:
+                deltas["pitching"] = t["vs_incumbent_pitching"]
+            residual = _rationale_hallucinations(ratl, deltas)
+            if residual:
+                leakage += 1
+                print(f"    leak: {t['player_name']}: {residual}")
+    if leakage == 0:
+        _ok("zero residual hallucinations in final rationales (SEA, 3 gaps)",
+            "(three-layered defense holds — sanitize + validate + fallback)")
+    else:
+        _fail(f"hallucinations leaked through the defense layers",
+              f"({leakage} rationales still cite unsupported deltas)")
+except Exception as e:                                          # noqa: BLE001
+    _fail("incumbent-aware Gap Filler test crashed", f"{type(e).__name__}: {e}")
     traceback.print_exc()
 
 

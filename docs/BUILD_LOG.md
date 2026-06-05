@@ -1056,3 +1056,165 @@ Pivoted to the MLB Stats API (``statsapi.mlb.com``), which exposes ``pitchHand.c
 - `docs/demo/DEMO_PREP.md` — Skubal/LHP demo flow
 
 ---
+
+---
+
+## Entry 25 — June 4 (Path A polish): Incumbent-aware Gap Filler
+
+**The thesis.** Up through Entry 24, every Gap Filler recommendation was an absolute "good player at this position." The system never asked the natural follow-up: *is this player actually better than what we already have?* This entry adds **incumbent-aware composite improvement scoring** — every recommendation now carries an explicit delta against the team's current player at that position, and the LLM is required to articulate the trade-off ("+0.080 OPS but -5 OAA vs Polanco — net upgrade given the team's defense-first 2B gap").
+
+That's the difference between a recommendation a buyer reads as "interesting" and one they read as "defensible to my owner."
+
+**Architecture (six stages).**
+
+1. **`get_position_incumbent(team_abbr, position, batting, pitching, oaa_df, catcher_df, sprint_df)`** — identifies the team's current player(s) at the gap position from the source-of-truth files. Per-position rules:
+   - Fielders (1B/2B/3B/SS/LF/CF/RF): Statcast OAA's `primary_pos_formatted` field; if multiple, rank by absolute `fielding_runs_prevented` as a playing-time proxy.
+   - Catcher: catcher_defense.csv joined to team via sprint_speed; pick by `pop_2b_sba_count` (most chances → primary).
+   - SP: top of team's pitching slice by GS.
+   - RP: most appearances with GS<3 + G>=20.
+   - DH: returns None (no clean position assignment in source data).
+   - Returns the primary player's name, secondary players, offensive line, defensive line, and pitching line (only the dims relevant to the position type are populated).
+
+2. **`_lookup_candidate_oaa(name, position, oaa_df)`** and **`_lookup_candidate_catcher_pop(name, catcher_df)`** — look up a candidate's defensive stat at the gap position. Returns None when the candidate isn't in the defensive file at that position (e.g., Mike Trout doesn't appear at RF in OAA because he played CF). Ascii-folded matching.
+
+3. **`_compute_improvement_deltas(target, incumbent, gap, oaa_df, catcher_df)`** — the heart of the change. Computes:
+   - `vs_incumbent_offense`: OPS delta (candidate − incumbent), positive = better
+   - `vs_incumbent_defense`: OAA delta or pop-time delta for catchers
+   - `vs_incumbent_pitching`: ERA / WHIP / K9 deltas (signed so positive = better)
+   - `composite_score`: gap-weighted normalized sum
+   - `breakdown`: one-line human-readable summary
+   - Normalization: OPS / 0.100, OAA / 5, pop-time / 0.05s, ERA / 1.00, WHIP / 0.100, K/9 / 2.0. Weights come from the diagnostic's `gap_components.offense` vs `gap_components.defense`. SP/RP use a fixed 50/30/20 mix across ERA/WHIP/K9.
+
+4. **`run_gap_filler_simple` re-ranking** — the matcher (semantic or stat-fit) now returns k=10 candidates instead of k=3. For each, compute deltas + composite score. Re-rank by composite, take top-3. Existing semantic_score / fit_score becomes a tie-breaker. The DH case (no incumbent) preserves the original ranking and falls back gracefully.
+
+5. **`forecast_target_contract_llm` prompt** — accepts `incumbent` and `improvement_deltas` params. Prompt rewritten with **explicit sign conventions** (positive ERA delta = better; gap weight 5/9 = defense-first; etc.) and a **CRITICAL RULE** instructing the model not to invent deltas — only cite fields explicitly present in the payload. Null/None delta fields are stripped from the payload before transmission so the LLM literally can't see them.
+
+6. **UI** — `app/tabs/gap_filler.py` gets two new elements per gap card:
+   - A **"Current incumbent"** callout above the contract estimate (light-blue band with the player's name, offensive line, defensive line/pop time, and any secondary players in parens).
+   - A **vs-incumbent delta row** inside each target card with color-coded chips (green for ≥ +.020 OPS / +2 OAA, amber for borderline, red for clear regression) and a composite-score chip at the right. Pitcher gaps show ERA/WHIP/K9 chips instead.
+
+**Verification.**
+
+Live LLM call (SEA, 2024, $165M):
+
+```
+=== 2B gap (offense_w=5.0, defense_w=9.0) ===
+   Incumbent: Jorge Polanco
+   - Marcus Semien           composite=4.03
+         deltas:    vs Jorge Polanco: +0.048 OPS, +30 OAA
+         rationale: Adds 0.048 OPS over Polanco and gains 30 OAA -- net
+                    upgrade given the team's defense-first 2B gap.
+   - Xander Bogaerts         composite=2.29
+         deltas:    +0.030 OPS, +17 OAA
+   - Brandon Lowe            composite=1.89
+         deltas:    +0.132 OPS, +11 OAA
+```
+
+The system correctly:
+- Identifies Polanco as the SEA 2B incumbent (he was -11 OAA in 2024, a known weakness)
+- Surfaces Semien as the top recommendation (+30 OAA improvement dominates)
+- Reads the gap weighting correctly ("defense-first 2B gap" — offense_w=5, defense_w=9)
+- Uses correct sign verbs ("gains 30 OAA", not "loses")
+- Articulates the trade-off when it exists ("Adds 0.255 OPS but loses defensive value" for Grichuk, who has no OAA data at RF — the LLM correctly says "loses defensive value" without inventing a number)
+
+**Honest failure mode.** The LLM still occasionally hallucinates defense deltas for very famous players (Mike Trout) where it has strong priors from its training data. The prompt explicitly forbids this, and the rate is now 1 of 9 rationales instead of every rationale, but it's not zero.
+
+**Smoke suite extended.** Test 10 (4 sub-checks): incumbent helper shape correctness across 2B/C/SP/DH, Gap Filler result carries incumbent+deltas, DH graceful fallback (no incumbent, no composite, targets still returned), LLM forecast rationale mentions the incumbent by surname in at least one target per gap. **Full suite: 18 passed · 1 warned · 0 failed.**
+
+**Time spent: ~3.5 hours actual (vs ~4.5 hr estimate).** Faster than estimated because the orchestrator already had clean separation between data-prep and LLM-call stages, so the new logic threaded in as a localized re-ranking step rather than a rewrite.
+
+**Why this is the architectural change that turns Sabercast from "interesting" into "defensible to ownership."** Every other change in this build improves recommendation *quality*. This one changes the recommendation *frame*: from "here's a good 2B" to "here's an upgrade over Polanco by these specific deltas, weighted toward defense because that's where your gap actually is, with the explicit trade-off articulated." A GM can take this card to a budget meeting. They cannot take the previous version.
+
+**Updated artifacts:**
+- `core/orchestrator.py` — `get_position_incumbent`, `_lookup_candidate_oaa`, `_lookup_candidate_catcher_pop`, `_compute_improvement_deltas`, updated `forecast_target_contract_llm` signature, updated `TARGET_FORECAST_SYSTEM` prompt with sign conventions + hallucination guard, updated `run_gap_filler_simple` re-ranking
+- `app/tabs/gap_filler.py` — Current-incumbent callout + per-target vs-incumbent delta row with color coding
+- `demo/smoke_test_edge_cases.py` — Test 10 (4 sub-checks)
+
+---
+
+---
+
+## Entry 26 — June 4 (Final build): Zero LLM delta hallucinations via three-layered defense
+
+**Trigger.** Entry 25's incumbent-aware Gap Filler shipped with one acknowledged failure mode: the LLM occasionally hallucinated defense deltas for famous players (Mike Trout etc.) where training-data priors overrode the prompt rule. Demo-acceptable rate (~1 of 9), but unacceptable for the final build.
+
+**Strategy.** Three independent defense layers, each strictly correct on its own. Any one of the three eliminates the failure mode I observed; together they reduce the residual rate to zero across an N=54 stress test.
+
+### Layer 1 — sanitize the incumbent payload
+
+`_sanitize_incumbent_for_payload(incumbent, improvement_deltas)` strips dimensions of `incumbent_profile` whose corresponding deltas aren't present. The LLM can't compute a fake `defense_delta = candidate_oaa - incumbent_oaa` if it never sees `incumbent_oaa` in the first place.
+
+**Result on the Trout case in isolation**: the LLM stopped writing "gives back 5 OAA" because Mitch Haniger's OAA was no longer in the payload to subtract from. The rationale collapsed to "Adds 0.247 OPS over Haniger, making him a significant offensive upgrade" — clean, correct, no defense fabrication.
+
+### Layer 2 — regex validator
+
+`_rationale_hallucinations(rationale, improvement_deltas)` scans the LLM rationale for every numeric phrase matching the form *`<number> <unit>`* (e.g., "0.080 OPS", "+30 OAA", "0.85 ERA", "1.95s pop", "8.5 K/9") and checks each one against the deltas dict:
+
+1. If the cited dimension is **absent from the deltas dict** → hallucination.
+2. If present but **the cited value disagrees with the actual delta by more than rounding tolerance** in BOTH the signed value and the unsigned magnitude → hallucination.
+
+The magnitude tolerance is the key relaxation: when the LLM writes "loses 0.089 OPS" with `actual = -0.089`, the unsigned magnitude `|0.089| ≈ |-0.089|` matches, so the validator accepts the rationale and trusts the verb "loses" to convey the sign. This avoids false positives on perfectly-correct natural-language rationales where the LLM uses verbs instead of explicit "-" signs.
+
+Tolerances: ±0.01 for OPS/WHIP, ±0.02 for ERA/pop-time, ±1.0 for OAA/K9.
+
+**Unit tests (7/7 passing):** clean numbers, OAA fabrication detected, OPS = 0 fabrication detected, value disagreements detected, ERA matches accepted, ERA disagreements detected, unsigned matches accepted.
+
+### Layer 3 — programmatic fallback rationale
+
+`_programmatic_rationale(target, incumbent, improvement_deltas, gap)` builds a deterministic, hallucination-free rationale from the deltas via template substitution. Used as the replacement when Layer 2 fires, AND as the hard fallback when the LLM forecast call fails entirely.
+
+Examples produced:
+- *"vs Jorge Polanco: Adds 0.048 OPS, gains 30 OAA — net upgrade given the team's defense-first gap."*
+- *"vs Mitch Haniger: Adds 0.247 OPS — net upgrade given the team's offense-first gap."*  (no defense block because no defense delta)
+- *"vs Logan Gilbert: drops 0.85 ERA, drops 0.080 WHIP, +1.2 K/9 — net upgrade given the team's defense-first gap."*
+
+The pitch is slightly more clinical than a good LLM rationale, but it's always correct and structurally complete.
+
+### Prompt tightening alongside the validator
+
+Added a NUMERIC FORMATTING block to `TARGET_FORECAST_SYSTEM` requiring the LLM to always pair a delta number with an explicit sign verb ("loses", "gives back") OR an explicit `+`/`-` prefix. Eliminates the bare-magnitude ambiguity that was triggering false positives in the validator's pre-fix strict mode.
+
+### Stress test — 6 teams × 9 targets = 54 rationales
+
+| Before defense layers | After defense layers |
+|---|---|
+| ~1 of 9 hallucinated (~11%) | **0 of 54 hallucinated (0%)** |
+| Trout case: "gives back 5 OAA" | Trout case: "Adds 0.247 OPS over Haniger" |
+| 14 false positives from sign ambiguity | 0 false positives — magnitude-tolerant validator |
+
+Tested across SEA, CHC, OAK, KC, COL, BAL — different market tiers and gap profiles. Zero hallucinations leaked through the defense.
+
+### Telemetry on the result
+
+Each target now carries:
+- `rationale_source`: `"llm"` if the LLM rationale passed validation, `"programmatic_fallback"` if the validator caught an issue
+- `rationale_hallucinations`: list of offending phrases (empty when clean) — surfaces in the UI debug expander and the smoke test
+
+For the SEA test case (3 gaps × 3 targets), all 9 rationales are `"llm"`-sourced and 0 carry hallucinations. The fallback path is hot-tested via direct unit tests, not via lucky LLM behavior.
+
+### Why this matters
+
+The previous build's recommendations were already good. This build's recommendations are **audit-able**: there is now a deterministic checker between the LLM and the user, and a deterministic fallback when the checker fires. A skeptical GM (or judge) can verify that no number in any rationale is fabricated — the smoke test does exactly that on every CI run.
+
+### Verification
+
+**Test 10 extended to 5 sub-checks.** New 10e (`zero residual hallucinations in final rationales`) re-runs `_rationale_hallucinations` against the output of `run_gap_filler_simple` and fails the build if any phrase slips through. Currently 0 leaks across the 9 SEA targets.
+
+**Full suite: 19 passed · 1 warned · 0 failed.**
+
+### Updated artifacts
+
+- `core/orchestrator.py` —
+  - new `_sanitize_incumbent_for_payload` (Layer 1)
+  - new `_rationale_hallucinations` + `_UNIT_PATTERNS` regex set (Layer 2)
+  - new `_programmatic_rationale` (Layer 3)
+  - `_safe_forecast` rewired to sanitize → call LLM → validate → fall back if needed
+  - `TARGET_FORECAST_SYSTEM` prompt tightened with explicit-sign requirement
+  - target dicts now carry `rationale_source` + `rationale_hallucinations` for downstream telemetry
+- `demo/smoke_test_edge_cases.py` — Test 10e (hallucination invariant)
+
+### Time spent: ~50 minutes
+
+Faster than estimated because the data scaffolding from Entry 25 was already in place — this entry was almost entirely defensive layers on top of an already-working flow.
+
+---

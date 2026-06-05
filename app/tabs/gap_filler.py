@@ -366,6 +366,7 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
     targets = gr.get("targets") or []
     pricing_comps = gr.get("pricing_comparables") or []
     est = gr["estimate"]
+    incumbent = gr.get("incumbent")
 
     with st.container(border=True):
         # ── Header strip: position + impact + gap score ──────────────────────
@@ -395,6 +396,50 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
 
         st.divider()
 
+        # ── Current incumbent at this position ──────────────────────────────
+        # Shows the team's current player(s) at the gap position, so every
+        # target recommendation below can be read as "vs this baseline."
+        if incumbent and incumbent.get("primary_player"):
+            inc_bits: list[str] = []
+            if incumbent.get("offense"):
+                o = incumbent["offense"]
+                inc_bits.append(
+                    f"OPS <b>{o['OPS']:.3f}</b> "
+                    f"({o['PA']} PA, {o['HR']} HR)"
+                )
+            if incumbent.get("defense") and incumbent["defense"].get("oaa") is not None:
+                d = incumbent["defense"]
+                delta = d.get("delta_vs_league") or 0
+                color = "#2E863E" if delta >= 0 else "#B33A3A"
+                inc_bits.append(
+                    f"OAA <b style='color:{color}'>{d['oaa']:+d}</b> "
+                    f"({delta:+.1f} vs league/team)"
+                )
+            if incumbent.get("defense") and incumbent["defense"].get("pop_2b_sba"):
+                inc_bits.append(
+                    f"pop time <b>{incumbent['defense']['pop_2b_sba']:.2f}s</b>"
+                )
+            if incumbent.get("pitching"):
+                p = incumbent["pitching"]
+                inc_bits.append(
+                    f"<b>{p['GS']} GS</b>, ERA <b>{p['ERA']:.2f}</b>, "
+                    f"WHIP <b>{p['WHIP']:.3f}</b>, K/9 <b>{p['K9']:.1f}</b>"
+                )
+            secondary = incumbent.get("secondary_players") or []
+            sec_hint = (f" &nbsp;<span style='color:#888;font-size:0.85em'>"
+                         f"(+ {', '.join(secondary[:2])}"
+                         f"{'…' if len(secondary) > 2 else ''})</span>"
+                         if secondary else "")
+            st.markdown(
+                f"<div style='background:#F0F4F8;padding:8px 12px;"
+                f"border-left:3px solid #3A82CD;border-radius:4px;margin-bottom:10px'>"
+                f"<span style='color:#666;font-size:0.85em'>Current incumbent &middot; "
+                f"</span><b>{incumbent['primary_player']}</b>{sec_hint}<br>"
+                f"<span style='font-size:0.9em'>{' &middot; '.join(inc_bits)}</span>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+
         # ── Contract estimate (left) | Recommended targets (right) ──────────
         est_col, targ_col = st.columns([2, 3])
         with est_col:
@@ -418,10 +463,17 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
         with targ_col:
             n_tgt = gr.get("n_targets_available", len(targets))
             source = gr.get("targets_source", "stat_fit")
-            source_label = ("ranked by ChromaDB semantic match against the gap's "
-                            "diagnostic reasoning, then filtered to within-budget "
-                            "contracts at this position") if source == "vectorstore" \
-                            else "ranked by 2024 statistical fit"
+            base = ("retrieved by ChromaDB semantic match against the gap's "
+                    "diagnostic reasoning, filtered to within-budget contracts "
+                    "at this position") if source == "vectorstore" \
+                   else "filtered by position and within-budget contracts"
+            if incumbent and incumbent.get("primary_player"):
+                source_label = (
+                    f"{base}, then re-ranked by composite improvement over "
+                    f"the current incumbent {incumbent['primary_player']}"
+                )
+            else:
+                source_label = base + " (no incumbent baseline available)"
             st.markdown(
                 f"**Recommended targets** &nbsp;<span style='color:#666;font-size:0.85em'>"
                 f"({n_tgt} {'option' if n_tgt == 1 else 'options'}, {source_label})"
@@ -452,6 +504,79 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
                             f"</div>",
                             unsafe_allow_html=True,
                         )
+
+                        # vs-incumbent delta row (task #62) -- the "trade-off"
+                        # signal. Color-coded: green = improvement, amber = mild
+                        # regression, red = clear regression.
+                        comp_score = t.get("composite_score")
+                        if comp_score is not None and incumbent and incumbent.get("primary_player"):
+                            off_d = t.get("vs_incumbent_offense")
+                            def_d = t.get("vs_incumbent_defense")
+                            pit_d = t.get("vs_incumbent_pitching")
+                            chips: list[str] = []
+                            if off_d is not None:
+                                col = ("#2E863E" if off_d >= 0.020
+                                        else "#C08C00" if off_d >= -0.020
+                                        else "#B33A3A")
+                                chips.append(
+                                    f"<span style='color:{col}'>"
+                                    f"{off_d:+.3f} OPS</span>"
+                                )
+                            if def_d is not None and pit_d is None:
+                                col = ("#2E863E" if def_d >= 2
+                                        else "#C08C00" if def_d >= -2
+                                        else "#B33A3A")
+                                # Catcher: pop time delta is in seconds; others: OAA outs
+                                if gap.get("position") == "C":
+                                    chips.append(
+                                        f"<span style='color:{col}'>"
+                                        f"{def_d:+.3f}s pop</span>"
+                                    )
+                                else:
+                                    chips.append(
+                                        f"<span style='color:{col}'>"
+                                        f"{def_d:+d} OAA</span>"
+                                    )
+                            if pit_d is not None:
+                                era_d  = pit_d.get("ERA_delta", 0)
+                                whip_d = pit_d.get("WHIP_delta", 0)
+                                k9_d   = pit_d.get("K9_delta", 0)
+                                col_era = ("#2E863E" if era_d >= 0.30
+                                            else "#C08C00" if era_d >= -0.30
+                                            else "#B33A3A")
+                                col_whip = ("#2E863E" if whip_d >= 0.050
+                                             else "#C08C00" if whip_d >= -0.050
+                                             else "#B33A3A")
+                                col_k9 = ("#2E863E" if k9_d >= 0.5
+                                           else "#C08C00" if k9_d >= -0.5
+                                           else "#B33A3A")
+                                chips.append(
+                                    f"<span style='color:{col_era}'>"
+                                    f"{era_d:+.2f} ERA</span>"
+                                )
+                                chips.append(
+                                    f"<span style='color:{col_whip}'>"
+                                    f"{whip_d:+.3f} WHIP</span>"
+                                )
+                                chips.append(
+                                    f"<span style='color:{col_k9}'>"
+                                    f"{k9_d:+.1f} K/9</span>"
+                                )
+                            comp_col = ("#2E863E" if comp_score >= 1.0
+                                         else "#C08C00" if comp_score >= 0
+                                         else "#B33A3A")
+                            st.markdown(
+                                f"<div style='margin-top:8px;padding:6px 8px;"
+                                f"background:#FAFBFC;border-radius:4px;"
+                                f"font-size:0.85em'>"
+                                f"<span style='color:#666'>vs {incumbent['primary_player']}: </span>"
+                                f"{' &middot; '.join(chips)}"
+                                f" &nbsp;|&nbsp; "
+                                f"<span style='color:{comp_col}'>composite "
+                                f"<b>{comp_score:+.2f}</b></span>"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
 
                         # Forecast AAV (what this player would command on a new deal)
                         f_aav = t.get("forecast_aav")

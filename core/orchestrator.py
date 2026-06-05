@@ -19,6 +19,7 @@ Flow:
 from __future__ import annotations
 
 import json
+import re
 import time
 import unicodedata
 from pathlib import Path
@@ -427,6 +428,623 @@ def compute_defense_deltas(team_defense: dict, league_defense: dict) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Position-incumbent identification
+#
+# For each gap position the Gap Filler flags, we want to compare candidate FAs
+# against the team's CURRENT incumbent at that position — not against league
+# average in the abstract. This gives the LLM the material to surface explicit
+# trade-offs ("Player X is +0.080 OPS but -5 OAA vs your current 2B Polanco").
+#
+# Identification rules per position type:
+#   * Fielders (1B/2B/3B/SS/LF/CF/RF) — Statcast OAA's primary_pos_formatted.
+#     If multiple players are listed at the position for one team, pick the one
+#     with the highest absolute fielding_runs_prevented (proxy for playing time).
+#   * Catcher (C) — catcher_defense rows joined to the team via sprint_speed.
+#   * Starting Pitcher (SP) — top of the team's pitching slice by GS.
+#   * Relief Pitcher (RP) — most appearances (G) with GS<3 in the team's slice.
+#   * DH — no clean primary-position assignment in the source data. We skip it
+#     and let the matcher fall back to league-baseline scoring.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _lookup_candidate_oaa(name: str, position: str,
+                          oaa_df: pd.DataFrame | None) -> int | None:
+    """Look up a hitter's 2024 OAA at the gap position. Returns None if the
+    player isn't in the OAA file at that position (didn't play it enough)."""
+    if oaa_df is None or oaa_df.empty or not name:
+        return None
+    folded = _ascii_fold(name).lower()
+    rows = oaa_df[
+        oaa_df["last_name, first_name"].astype(str).map(
+            lambda n: _ascii_fold(_oaa_name_to_human(str(n))).lower()
+        ) == folded
+    ]
+    rows = rows[rows["primary_pos_formatted"].astype(str) == position]
+    if rows.empty:
+        return None
+    val = pd.to_numeric(rows["outs_above_average"], errors="coerce").iloc[0]
+    return int(val) if pd.notna(val) else None
+
+
+def _lookup_candidate_catcher_pop(name: str,
+                                   catcher_df: pd.DataFrame | None) -> float | None:
+    """Look up a catcher's 2024 pop time to 2B. Lower = better (faster arm)."""
+    if catcher_df is None or catcher_df.empty or not name:
+        return None
+    folded = _ascii_fold(name).lower()
+    rows = catcher_df[
+        catcher_df["entity_name"].astype(str).map(
+            lambda n: _ascii_fold(_oaa_name_to_human(str(n))).lower()
+        ) == folded
+    ]
+    if rows.empty:
+        return None
+    val = pd.to_numeric(rows["pop_2b_sba"], errors="coerce").iloc[0]
+    return round(float(val), 3) if pd.notna(val) else None
+
+
+def _compute_improvement_deltas(target: dict, incumbent: dict | None,
+                                 gap: dict,
+                                 oaa_df: pd.DataFrame | None = None,
+                                 catcher_df: pd.DataFrame | None = None) -> dict:
+    """Compute how much this target improves on the team's current incumbent
+    at the gap position.
+
+    Returns dict carrying:
+      * vs_incumbent_offense  : OPS delta (positive = better) | None
+      * vs_incumbent_defense  : OAA delta (or -pop delta for C) | None
+      * vs_incumbent_pitching : dict of ERA/WHIP/K9 deltas for SP/RP | None
+      * composite_score       : normalized + gap-weighted scalar | None
+      * breakdown             : 1-line human-readable summary
+      * incumbent_name        : for cross-reference in UI
+
+    Normalization (so offense and defense are roughly comparable):
+      * OPS delta divided by 0.100  (a 100-pt OPS jump = 1.0 unit)
+      * OAA delta divided by 5      (a 5-OAA jump = 1.0 unit)
+      * Pop-time delta divided by 0.05 seconds (50 ms = 1.0 unit, *negated*)
+      * ERA delta divided by 1.00   (1.00 ERA improvement = 1.0 unit)
+      * WHIP delta divided by 0.100 (100-pt WHIP improvement = 1.0 unit)
+      * K9 delta divided by 2.0     (2.0 K/9 improvement = 1.0 unit)
+
+    Weighting:
+      * Hitter+fielder gaps  -> use gap_components.offense / defense ratio
+      * Catcher              -> use gap_components.offense / defense ratio,
+                                where defense is pop-time
+      * SP / RP gaps         -> ERA 0.50 + WHIP 0.30 + K9 0.20 (fixed mix)
+      * DH (incumbent=None)  -> composite=None, fall back to absolute fit
+    """
+    if not incumbent:
+        return {
+            "vs_incumbent_offense":  None,
+            "vs_incumbent_defense":  None,
+            "vs_incumbent_pitching": None,
+            "composite_score":       None,
+            "breakdown":             ("Incumbent not identifiable for this "
+                                       "position — ranking falls back to "
+                                       "absolute stat fit."),
+            "incumbent_name":        None,
+        }
+
+    position = gap.get("position", "")
+    inc_name = incumbent.get("primary_player", "")
+
+    gap_components = gap.get("gap_components") or {}
+    off_raw = float(gap_components.get("offense", 50) or 0)
+    def_raw = float(gap_components.get("defense", 50) or 0)
+    total   = off_raw + def_raw
+    off_w   = off_raw / total if total > 0 else 0.5
+    def_w   = def_raw / total if total > 0 else 0.5
+
+    cand_stats = target.get("stats_2024") or {}
+    cand_name  = target.get("player_name", "")
+
+    # ── Pitcher gap ─────────────────────────────────────────────────────────
+    if position in {"SP", "RP"} and incumbent.get("pitching"):
+        if cand_stats.get("role") != "pitcher":
+            return {
+                "vs_incumbent_offense": None, "vs_incumbent_defense": None,
+                "vs_incumbent_pitching": None, "composite_score": None,
+                "breakdown": "Candidate has no pitcher stats — cannot compare.",
+                "incumbent_name": inc_name,
+            }
+        inc_pit = incumbent["pitching"]
+        era_d  = round(inc_pit.get("ERA", 0) - (cand_stats.get("ERA") or 0), 2)
+        whip_d = round(inc_pit.get("WHIP", 0) - (cand_stats.get("WHIP") or 0), 3)
+        k9_d   = round((cand_stats.get("K9") or 0) - inc_pit.get("K9", 0), 1)
+        composite = (0.50 * (era_d / 1.00)
+                      + 0.30 * (whip_d / 0.100)
+                      + 0.20 * (k9_d / 2.0))
+        pitch_deltas = {"ERA_delta": era_d, "WHIP_delta": whip_d, "K9_delta": k9_d}
+        verb_era  = "better" if era_d  > 0 else "worse" if era_d  < 0 else "same"
+        verb_whip = "better" if whip_d > 0 else "worse" if whip_d < 0 else "same"
+        breakdown = (f"vs {inc_name}: {abs(era_d):.2f} ERA {verb_era}, "
+                     f"{abs(whip_d):.3f} WHIP {verb_whip}, "
+                     f"{k9_d:+.1f} K/9")
+        return {
+            "vs_incumbent_offense":  None,
+            "vs_incumbent_defense":  None,
+            "vs_incumbent_pitching": pitch_deltas,
+            "composite_score":       round(composite, 2),
+            "breakdown":             breakdown,
+            "incumbent_name":        inc_name,
+        }
+
+    # ── Catcher gap ─────────────────────────────────────────────────────────
+    if position == "C":
+        # Offense delta (against incumbent catcher's OPS)
+        offense_delta = None
+        offense_norm  = 0.0
+        if (incumbent.get("offense") and cand_stats.get("role") == "hitter"):
+            inc_ops  = incumbent["offense"].get("OPS", 0)
+            cand_ops = cand_stats.get("OPS", 0) or 0
+            offense_delta = round(cand_ops - inc_ops, 3)
+            offense_norm  = offense_delta / 0.100
+        # Defense delta — pop time (lower = better; flip sign)
+        defense_delta = None
+        defense_norm  = 0.0
+        if incumbent.get("defense") and incumbent["defense"].get("pop_2b_sba"):
+            inc_pop  = incumbent["defense"]["pop_2b_sba"]
+            cand_pop = _lookup_candidate_catcher_pop(cand_name, catcher_df)
+            if cand_pop is not None:
+                defense_delta = round(inc_pop - cand_pop, 3)   # positive = candidate is faster
+                defense_norm  = defense_delta / 0.05
+        composite = off_w * offense_norm + def_w * defense_norm
+        bits = []
+        if offense_delta is not None:
+            bits.append(f"{offense_delta:+.3f} OPS")
+        if defense_delta is not None:
+            bits.append(f"{defense_delta:+.3f}s pop time")
+        breakdown = (f"vs {inc_name}: " + ", ".join(bits)) if bits else (
+            f"vs {inc_name}: limited stat overlap to compare.")
+        return {
+            "vs_incumbent_offense":  offense_delta,
+            "vs_incumbent_defense":  defense_delta,
+            "vs_incumbent_pitching": None,
+            "composite_score":       round(composite, 2),
+            "breakdown":             breakdown,
+            "incumbent_name":        inc_name,
+        }
+
+    # ── Hitter + fielder gap (1B/2B/3B/SS/LF/CF/RF) ─────────────────────────
+    if position in _FIELDER_POSITIONS:
+        offense_delta = None
+        offense_norm  = 0.0
+        if (incumbent.get("offense") and cand_stats.get("role") == "hitter"):
+            inc_ops  = incumbent["offense"].get("OPS", 0)
+            cand_ops = cand_stats.get("OPS", 0) or 0
+            offense_delta = round(cand_ops - inc_ops, 3)
+            offense_norm  = offense_delta / 0.100
+        defense_delta = None
+        defense_norm  = 0.0
+        if incumbent.get("defense"):
+            inc_oaa  = incumbent["defense"].get("oaa", 0) or 0
+            cand_oaa = _lookup_candidate_oaa(cand_name, position, oaa_df)
+            if cand_oaa is not None:
+                defense_delta = int(cand_oaa - inc_oaa)
+                defense_norm  = defense_delta / 5.0
+        composite = off_w * offense_norm + def_w * defense_norm
+        bits = []
+        if offense_delta is not None:
+            bits.append(f"{offense_delta:+.3f} OPS")
+        if defense_delta is not None:
+            bits.append(f"{defense_delta:+d} OAA")
+        breakdown = (f"vs {inc_name}: " + ", ".join(bits)) if bits else (
+            f"vs {inc_name}: limited stat overlap to compare.")
+        return {
+            "vs_incumbent_offense":  offense_delta,
+            "vs_incumbent_defense":  defense_delta,
+            "vs_incumbent_pitching": None,
+            "composite_score":       round(composite, 2),
+            "breakdown":             breakdown,
+            "incumbent_name":        inc_name,
+        }
+
+    # Position not handled (shouldn't happen — DH already exited above)
+    return {
+        "vs_incumbent_offense":  None,
+        "vs_incumbent_defense":  None,
+        "vs_incumbent_pitching": None,
+        "composite_score":       None,
+        "breakdown":             f"No comparison logic for position {position}.",
+        "incumbent_name":        inc_name,
+    }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hallucination defense for the forecast LLM rationale (task #63)
+#
+# Three layered defenses against the model inventing delta numbers:
+#
+#   1. ``_sanitize_incumbent_for_payload(incumbent, improvement_deltas)`` —
+#      strips dimensions of the incumbent profile that don't have a
+#      corresponding delta. Removes the raw material the LLM uses to "compute"
+#      deltas from its training-data priors for famous players.
+#
+#   2. ``_rationale_hallucinations(rationale, improvement_deltas)`` — regex
+#      scan for number+unit pairs ("X OAA", "X.XXX OPS", "X.XX ERA") that
+#      reference dimensions absent from the deltas dict, OR whose numeric
+#      values disagree with the known delta values by more than rounding
+#      tolerance. Returns a list of offending phrases (empty = clean).
+#
+#   3. ``_programmatic_rationale(target, incumbent, improvement_deltas,
+#      gap)`` — deterministic, hallucination-free rationale built from the
+#      known deltas via template substitution. Used as a hard fallback when
+#      the LLM rationale fails validation.
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _sanitize_incumbent_for_payload(incumbent: dict | None,
+                                     improvement_deltas: dict | None) -> dict | None:
+    """Strip incumbent dimensions whose corresponding deltas aren't in the
+    deltas dict. The LLM can't compute a fake defense delta if it can't see
+    the incumbent's defensive stats in the first place.
+    """
+    if not incumbent or not improvement_deltas:
+        return incumbent
+    sanitized = {k: v for k, v in incumbent.items()
+                  if k not in {"offense", "defense", "pitching"}}
+    if "offense" in improvement_deltas:
+        sanitized["offense"] = incumbent.get("offense")
+    if "defense" in improvement_deltas:
+        sanitized["defense"] = incumbent.get("defense")
+    if "pitching" in improvement_deltas:
+        sanitized["pitching"] = incumbent.get("pitching")
+    return sanitized
+
+
+# Regex patterns -- match common forms the model uses to cite deltas.
+# Examples covered:
+#   "+0.080 OPS"  ".080 OPS"  "0.080 OPS"  "loses 5 OAA"  "+30 OAA"
+#   "0.85 ERA"    ".850 WHIP"  "8.5 K/9"   "1.95s pop"
+_NUM = r"[+\-]?\d+(?:\.\d+)?"
+_UNIT_PATTERNS = {
+    "offense":  re.compile(rf"({_NUM})\s*OPS\b", re.IGNORECASE),
+    "defense_oaa": re.compile(rf"({_NUM})\s*OAA\b", re.IGNORECASE),
+    "defense_pop": re.compile(rf"({_NUM})\s*s\s*pop\b", re.IGNORECASE),
+    "era":      re.compile(rf"({_NUM})\s*ERA\b", re.IGNORECASE),
+    "whip":     re.compile(rf"({_NUM})\s*WHIP\b", re.IGNORECASE),
+    "k9":       re.compile(rf"({_NUM})\s*K/9\b", re.IGNORECASE),
+}
+
+
+def _rationale_hallucinations(rationale: str,
+                                improvement_deltas: dict | None) -> list[str]:
+    """Return a list of hallucinated phrases in the rationale (empty = clean).
+
+    A phrase is considered hallucinated if it cites a stat dimension not
+    present in the deltas dict, OR if it cites a numeric value that doesn't
+    match the known delta within rounding tolerance.
+    """
+    if not rationale:
+        return []
+    if not improvement_deltas:
+        # No deltas at all -> any "X OAA" / "X OPS" / etc reference is a hallucination
+        improvement_deltas = {}
+
+    has_offense  = "offense"  in improvement_deltas
+    has_defense  = "defense"  in improvement_deltas
+    has_pitching = "pitching" in improvement_deltas
+
+    pitching = improvement_deltas.get("pitching") or {}
+    known: dict[str, float | None] = {
+        "offense":     improvement_deltas.get("offense") if has_offense else None,
+        "defense_oaa": improvement_deltas.get("defense") if has_defense else None,
+        "defense_pop": improvement_deltas.get("defense") if has_defense else None,
+        "era":         pitching.get("ERA_delta")  if has_pitching else None,
+        "whip":        pitching.get("WHIP_delta") if has_pitching else None,
+        "k9":          pitching.get("K9_delta")   if has_pitching else None,
+    }
+
+    issues: list[str] = []
+    for key, pattern in _UNIT_PATTERNS.items():
+        for m in pattern.finditer(rationale):
+            num_str  = m.group(1)
+            try:
+                cited = float(num_str)
+            except ValueError:
+                continue
+            phrase = m.group(0)
+            if known.get(key) is None:
+                # This dimension simply isn't in the deltas -> hallucination
+                issues.append(phrase)
+                continue
+            # Both present. We accept if either the signed value OR the
+            # unsigned magnitude matches the actual delta within tolerance.
+            # That charitable rule lets the LLM write "loses 0.089 OPS" when
+            # actual=-0.089 without being flagged for a missing sign. Real
+            # number-fabrications (the cited magnitude doesn't match at all)
+            # are still caught.
+            actual = float(known[key])
+            tol = 0.01 if key in {"offense", "whip"} else (
+                  0.02 if key in {"era", "defense_pop"} else 1.0)
+            signed_match    = abs(cited - actual) <= tol
+            magnitude_match = abs(abs(cited) - abs(actual)) <= tol
+            if not (signed_match or magnitude_match):
+                issues.append(f"{phrase} (actual {actual:+.3f})")
+    return issues
+
+
+def _programmatic_rationale(target: dict, incumbent: dict | None,
+                             improvement_deltas: dict | None,
+                             gap: dict | None) -> str:
+    """Build a deterministic hallucination-free rationale from the deltas.
+
+    Used as a hard fallback when the LLM's rationale fails validation, and
+    also as the rationale the LLM is shown as a "ground-truth" template.
+    """
+    if not incumbent or not improvement_deltas:
+        return ("Recommendation based on stat-fit ranking — no incumbent "
+                "baseline available for explicit trade-off comparison.")
+    inc_name = incumbent.get("primary_player", "the incumbent")
+    bits: list[str] = []
+    off = improvement_deltas.get("offense")
+    if off is not None:
+        verb = "Adds" if off >= 0 else "Gives back"
+        bits.append(f"{verb} {abs(off):.3f} OPS")
+    defense = improvement_deltas.get("defense")
+    if defense is not None and (gap or {}).get("position") == "C":
+        # Catcher pop time: positive delta = faster (better)
+        verb = "improves" if defense >= 0 else "gives back"
+        bits.append(f"{verb} pop time by {abs(defense):.3f}s")
+    elif defense is not None:
+        verb = "gains" if defense >= 0 else "loses"
+        bits.append(f"{verb} {abs(int(defense))} OAA")
+    pitching = improvement_deltas.get("pitching") or {}
+    if "ERA_delta" in pitching:
+        era_d = pitching["ERA_delta"]
+        verb = "drops" if era_d >= 0 else "adds"
+        bits.append(f"{verb} {abs(era_d):.2f} ERA")
+    if "WHIP_delta" in pitching:
+        whip_d = pitching["WHIP_delta"]
+        verb = "drops" if whip_d >= 0 else "adds"
+        bits.append(f"{verb} {abs(whip_d):.3f} WHIP")
+    if "K9_delta" in pitching:
+        k9_d = pitching["K9_delta"]
+        bits.append(f"{k9_d:+.1f} K/9")
+
+    base = f"vs {inc_name}: " + ", ".join(bits) if bits else f"vs {inc_name}."
+    # Append a one-clause gap-priority interpretation
+    off_w = (gap or {}).get("gap_components", {}).get("offense") if gap else None
+    def_w = (gap or {}).get("gap_components", {}).get("defense") if gap else None
+    comp  = improvement_deltas.get("composite")
+    tail = ""
+    if comp is not None and off_w is not None and def_w is not None:
+        if off_w > def_w:
+            priority = "offense-first"
+        elif def_w > off_w:
+            priority = "defense-first"
+        else:
+            priority = "balanced"
+        verdict = "net upgrade" if comp >= 0 else "net downgrade"
+        tail = f" — {verdict} given the team's {priority} gap."
+    return base + tail
+
+
+def _lookup_hitter_offense_row(name: str, batting: pd.DataFrame) -> dict | None:
+    """Look up one hitter's offensive line by name (accent-tolerant)."""
+    if batting is None or batting.empty or not name:
+        return None
+    folded = _ascii_fold(name).lower()
+    match = batting[
+        batting["Name"].astype(str).map(lambda n: _ascii_fold(str(n)).lower()) == folded
+    ]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    return {
+        "PA":  int(row.get("PA",  0)) if pd.notna(row.get("PA"))  else 0,
+        "HR":  int(row.get("HR",  0)) if pd.notna(row.get("HR"))  else 0,
+        "AVG": round(float(row.get("AVG", row.get("BA", 0)) or 0), 3),
+        "OBP": round(float(row.get("OBP", 0) or 0), 3),
+        "SLG": round(float(row.get("SLG", 0) or 0), 3),
+        "OPS": round(float(row.get("OPS", 0) or 0), 3),
+    }
+
+
+def _oaa_name_to_human(oaa_name: str) -> str:
+    """Statcast OAA uses 'Last, First'. Flip to 'First Last' for join keys."""
+    if not isinstance(oaa_name, str) or "," not in oaa_name:
+        return str(oaa_name).strip()
+    last, first = [p.strip() for p in oaa_name.split(",", 1)]
+    return f"{first} {last}"
+
+
+_FIELDER_POSITIONS = {"1B", "2B", "3B", "SS", "LF", "CF", "RF"}
+_NICKNAME_BY_ABBR = {abbr: nick for nick, abbr in OAA_NICKNAME_TO_ABBR.items()}
+
+
+def get_position_incumbent(team_abbr: str, position: str,
+                            batting: pd.DataFrame, pitching: pd.DataFrame,
+                            oaa_df: pd.DataFrame | None = None,
+                            catcher_df: pd.DataFrame | None = None,
+                            sprint_df: pd.DataFrame | None = None) -> dict | None:
+    """Identify the team's current incumbent(s) at one gap position with their
+    offensive + defensive line. Returns ``None`` if the position has no clean
+    primary assignment in the source data (notably DH).
+
+    Output schema (only the keys relevant to the position type are populated):
+      {
+        "position":         "2B",
+        "primary_player":   "Jorge Polanco",
+        "secondary_players": ["Dylan Moore"],          # may be empty
+        "offense": {"PA": int, "OPS": float, "OBP": float,
+                    "SLG": float, "AVG": float, "HR": int} | None,
+        "defense": {"oaa": int, "frp": int, "league_avg_oaa": float,
+                    "delta_vs_league": float,
+                    "pop_2b_sba": float | None}        | None,
+        "pitching": {"IP": float, "GS": int, "ERA": float, "WHIP": float,
+                     "K9": float, "BB9": float, "HR9": float} | None,
+      }
+    """
+    if position == "DH":
+        return None
+
+    # ── Fielders ─────────────────────────────────────────────────────────────
+    if position in _FIELDER_POSITIONS:
+        if oaa_df is None or oaa_df.empty:
+            return None
+        nickname = _NICKNAME_BY_ABBR.get(team_abbr)
+        if not nickname:
+            return None
+        rows = oaa_df[
+            (oaa_df["display_team_name"].astype(str) == nickname)
+            & (oaa_df["primary_pos_formatted"].astype(str) == position)
+        ].copy()
+        if rows.empty:
+            return None
+        # Use |fielding_runs_prevented| as a proxy for playing time -- the
+        # regular starter usually has the largest-magnitude FRP.
+        rows["_abs_frp"] = pd.to_numeric(
+            rows["fielding_runs_prevented"], errors="coerce"
+        ).fillna(0).abs()
+        rows = rows.sort_values("_abs_frp", ascending=False)
+        primary_oaa_name = str(rows.iloc[0]["last_name, first_name"])
+        primary_player   = _oaa_name_to_human(primary_oaa_name)
+        secondary        = [_oaa_name_to_human(str(n))
+                            for n in rows.iloc[1:]["last_name, first_name"].tolist()]
+
+        # Aggregate team OAA at this position (all incumbents combined)
+        oaa_sum = int(pd.to_numeric(rows["outs_above_average"], errors="coerce").fillna(0).sum())
+        frp_sum = int(pd.to_numeric(rows["fielding_runs_prevented"], errors="coerce").fillna(0).sum())
+        # League-average OAA per team at this position
+        league_avg_oaa = 0.0
+        if oaa_df is not None:
+            pos_league = oaa_df[oaa_df["primary_pos_formatted"].astype(str) == position]
+            if not pos_league.empty:
+                league_avg_oaa = round(
+                    float(pd.to_numeric(pos_league["outs_above_average"], errors="coerce")
+                          .fillna(0).sum()) / 30.0, 2
+                )
+
+        offense = _lookup_hitter_offense_row(primary_player, batting)
+        return {
+            "position":          position,
+            "primary_player":    primary_player,
+            "secondary_players": secondary,
+            "offense":           offense,
+            "defense": {
+                "oaa":             oaa_sum,
+                "frp":             frp_sum,
+                "league_avg_oaa":  league_avg_oaa,
+                "delta_vs_league": round(oaa_sum - league_avg_oaa, 2),
+                "pop_2b_sba":      None,
+            },
+            "pitching":          None,
+        }
+
+    # ── Catcher ──────────────────────────────────────────────────────────────
+    if position == "C":
+        if catcher_df is None or catcher_df.empty or sprint_df is None:
+            return None
+        cat_join = catcher_df.merge(
+            sprint_df[["player_id", "team"]],
+            left_on="entity_id", right_on="player_id", how="left",
+        )
+        team_cat = cat_join[cat_join["team"].astype(str) == team_abbr]
+        if team_cat.empty:
+            return None
+        # Pick the catcher with the largest pop_2b_sba_count (most chances → primary)
+        team_cat = team_cat.copy()
+        team_cat["_chances"] = pd.to_numeric(
+            team_cat["pop_2b_sba_count"], errors="coerce"
+        ).fillna(0)
+        team_cat = team_cat.sort_values("_chances", ascending=False)
+        # entity_name in catcher_defense.csv uses "Last, First" — flip to
+        # "First Last" so the batting CSV join works.
+        primary_player = _oaa_name_to_human(str(team_cat.iloc[0]["entity_name"]))
+        secondary = [_oaa_name_to_human(str(n))
+                     for n in team_cat.iloc[1:]["entity_name"].tolist()]
+        pop_2b = pd.to_numeric(team_cat["pop_2b_sba"], errors="coerce").dropna()
+        offense = _lookup_hitter_offense_row(primary_player, batting)
+        return {
+            "position":          position,
+            "primary_player":    primary_player,
+            "secondary_players": secondary,
+            "offense":           offense,
+            "defense": {
+                "oaa":            None,
+                "frp":            None,
+                "league_avg_oaa": None,
+                "delta_vs_league": None,
+                "pop_2b_sba":     round(float(pop_2b.mean()), 3) if not pop_2b.empty else None,
+            },
+            "pitching":          None,
+        }
+
+    # ── Starting pitcher ─────────────────────────────────────────────────────
+    if position == "SP":
+        if pitching is None or pitching.empty:
+            return None
+        bref_team = TEAM_ABBR_TO_BREF.get(team_abbr)
+        team_pit = _filter_team(pitching, bref_team,
+                                 league=TEAM_ABBR_TO_LEAGUE.get(team_abbr))
+        starters = team_pit[team_pit["GS"].fillna(0) >= 5].copy()
+        if starters.empty:
+            return None
+        starters = starters.sort_values("GS", ascending=False)
+        primary_row    = starters.iloc[0]
+        primary_player = str(primary_row["Name"]).strip()
+        secondary      = [str(n).strip()
+                          for n in starters.iloc[1:5]["Name"].tolist()]
+        ip = float(primary_row.get("IP", 0) or 0)
+        bb = float(primary_row.get("BB", 0) or 0)
+        hr = float(primary_row.get("HR", 0) or 0)
+        return {
+            "position":          position,
+            "primary_player":    primary_player,
+            "secondary_players": secondary,
+            "offense":           None,
+            "defense":           None,
+            "pitching": {
+                "IP":   round(ip, 1),
+                "GS":   int(primary_row.get("GS", 0) or 0),
+                "ERA":  round(float(primary_row.get("ERA", 0) or 0), 2),
+                "WHIP": round(float(primary_row.get("WHIP", 0) or 0), 3),
+                "K9":   round(float(primary_row.get("SO9", 0) or 0), 1),
+                "BB9":  round((9.0 * bb / ip) if ip > 0 else 0.0, 1),
+                "HR9":  round((9.0 * hr / ip) if ip > 0 else 0.0, 2),
+            },
+        }
+
+    # ── Relief pitcher ───────────────────────────────────────────────────────
+    if position == "RP":
+        if pitching is None or pitching.empty:
+            return None
+        bref_team = TEAM_ABBR_TO_BREF.get(team_abbr)
+        team_pit = _filter_team(pitching, bref_team,
+                                 league=TEAM_ABBR_TO_LEAGUE.get(team_abbr))
+        relievers = team_pit[
+            (team_pit["GS"].fillna(0) < 3) & (team_pit["G"].fillna(0) >= 20)
+        ].copy()
+        if relievers.empty:
+            return None
+        relievers = relievers.sort_values("G", ascending=False)
+        primary_row    = relievers.iloc[0]
+        primary_player = str(primary_row["Name"]).strip()
+        secondary      = [str(n).strip()
+                          for n in relievers.iloc[1:5]["Name"].tolist()]
+        ip = float(primary_row.get("IP", 0) or 0)
+        bb = float(primary_row.get("BB", 0) or 0)
+        hr = float(primary_row.get("HR", 0) or 0)
+        return {
+            "position":          position,
+            "primary_player":    primary_player,
+            "secondary_players": secondary,
+            "offense":           None,
+            "defense":           None,
+            "pitching": {
+                "IP":   round(ip, 1),
+                "GS":   int(primary_row.get("GS", 0) or 0),
+                "ERA":  round(float(primary_row.get("ERA", 0) or 0), 2),
+                "WHIP": round(float(primary_row.get("WHIP", 0) or 0), 3),
+                "K9":   round(float(primary_row.get("SO9", 0) or 0), 1),
+                "BB9":  round((9.0 * bb / ip) if ip > 0 else 0.0, 1),
+                "HR9":  round((9.0 * hr / ip) if ip > 0 else 0.0, 2),
+            },
+        }
+
+    return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # LLM calls
 # ──────────────────────────────────────────────────────────────────────────────
 GAP_DIAGNOSTIC_SYSTEM = """You are an MLB front-office analyst evaluating where a team has the largest
@@ -501,9 +1119,11 @@ is required for every comparable; keep each one specific and non-repetitive."""
 
 
 TARGET_FORECAST_SYSTEM = """You are an MLB contract valuation analyst. Given a specific named player's
-recent statistical line, age, and position-matched comparable contracts,
-forecast the AAV and years that player would command on a NEW free-agent deal
-in the upcoming offseason.
+recent statistical line, age, position-matched comparable contracts, AND
+(when available) the team's CURRENT incumbent at the gap position along
+with this candidate's improvement deltas against that incumbent, forecast
+the AAV and years that player would command on a NEW free-agent deal AND
+articulate the trade-off in plain English.
 
 This is NOT the player's current contract — it is your forecast of what a new
 deal would look like if they hit the open market in the {market_year} offseason
@@ -515,7 +1135,7 @@ Return STRICT JSON only, no prose, with this exact schema:
   "player_name": "<name as provided>",
   "forecast_aav":   <integer USD>,
   "forecast_years": <integer>,
-  "rationale": "<one short phrase, max 15 words, citing the specific stats and comparables driving this forecast>"
+  "rationale": "<one short phrase, max 25 words, EXPLICITLY citing the trade-off vs the incumbent if incumbent_profile is provided -- e.g. 'Adds 0.080 OPS over Polanco but loses 5 OAA -- net upgrade given the team's offense-first 2B gap.' If incumbent_profile is null, fall back to citing the candidate's stats vs comparables.>"
 }
 
 Ground your forecast in the comparables provided. Factor in:
@@ -523,6 +1143,46 @@ Ground your forecast in the comparables provided. Factor in:
   * Age (younger players get longer terms; older players get shorter terms at lower AAV)
   * Positional scarcity (catchers and middle infielders earn premiums)
   * The current state of the comparable market at this position
+  * The improvement (or regression) over the incumbent across offense and defense
+
+SIGN CONVENTIONS for ``improvement_deltas`` -- READ CAREFULLY:
+  * ``offense`` (OPS delta)  -- POSITIVE means candidate is BETTER, NEGATIVE means WORSE
+  * ``defense`` (OAA delta)  -- POSITIVE means candidate is BETTER, NEGATIVE means WORSE
+  * ``defense`` for catchers (pop-time delta) -- POSITIVE means candidate has a FASTER (better) arm
+  * ``pitching.ERA_delta``   -- POSITIVE means candidate is BETTER (lower ERA)
+  * ``pitching.WHIP_delta``  -- POSITIVE means candidate is BETTER (lower WHIP)
+  * ``pitching.K9_delta``    -- POSITIVE means candidate is BETTER (higher K/9)
+  * ``composite``            -- POSITIVE means net upgrade over the incumbent
+  * Use the candidate's name with verbs like "gains" / "adds" for POSITIVE deltas,
+    and "gives back" / "loses" / "regresses" for NEGATIVE deltas.
+
+CRITICAL RULE -- DO NOT INVENT DELTAS:
+  * Only cite a dimension (offense / defense / pitching) that is EXPLICITLY
+    present in the ``improvement_deltas`` dict. If a field is absent, do NOT
+    mention it -- not even as "loses 1 OAA" or "no change in defense".
+  * Do NOT compute deltas yourself from ``incumbent_profile`` stats. The
+    ``incumbent_profile`` is shown for context only. If ``improvement_deltas``
+    doesn't carry a defense delta, the candidate's defense data simply isn't
+    available -- say nothing about defense in that case.
+
+NUMERIC FORMATTING -- ALWAYS write a delta with EITHER an explicit verb that
+encodes the sign OR an explicit "+" / "-" prefix. Never write a bare unsigned
+number when citing a delta:
+  * If ``offense`` = +0.080  -> "Adds 0.080 OPS" or "+0.080 OPS" -- both fine
+  * If ``offense`` = -0.089  -> "Loses 0.089 OPS" or "-0.089 OPS" -- never
+    write "0.089 OPS" alone, that's ambiguous about direction.
+  * Same rule for OAA / pop / ERA / WHIP / K/9. The user must be able to tell
+    from your rationale alone whether the candidate is better or worse on
+    each cited dimension.
+
+GAP WEIGHTING -- ``gap_components`` (in the position_comparables block, if shown):
+  * ``offense`` vs ``defense`` -- whichever is LARGER is the team's bigger
+    problem at this position. So an "offense=5, defense=9" gap is DEFENSE-FIRST,
+    not offense-first. Reflect that priority in the rationale.
+
+If ``improvement_deltas`` indicates the candidate is worse than the incumbent
+in some dimension, SAY SO honestly in the rationale rather than hiding it.
+A defensible recommendation acknowledges trade-offs.
 
 Do NOT reference market events after {market_year}."""
 
@@ -717,7 +1377,9 @@ def scout_opponent_llm(opponent_abbr: str,
 def forecast_target_contract_llm(player: dict, position: str,
                                  comparables: list[dict],
                                  market_year: int,
-                                 use_finetuned: bool = False) -> dict:
+                                 use_finetuned: bool = False,
+                                 incumbent: dict | None = None,
+                                 improvement_deltas: dict | None = None) -> dict:
     """One forecast call per recommended target.
 
     Produces a forward-looking forecast of what THIS SPECIFIC PLAYER would
@@ -725,6 +1387,11 @@ def forecast_target_contract_llm(player: dict, position: str,
     from their current contract AAV. The premium flag compares this forecast
     (what it would actually cost to sign them) against the gap-fill estimate
     (what the role appears to be worth at market).
+
+    ``incumbent`` and ``improvement_deltas`` (when provided) let the model
+    articulate the trade-off in the rationale -- e.g. "0.080 OPS over Polanco
+    but -5 OAA, net upgrade given the team's offense-first 2B gap". This is
+    the explicit-trade-off behavior added by task #62.
 
     When ``use_finetuned=True`` and pipelines/05c_finetune_together.py has
     completed, the call is routed to the Together AI Llama-3.1-8B model
@@ -752,8 +1419,13 @@ def forecast_target_contract_llm(player: dict, position: str,
             "years":        player.get("years"),
             "signed_year":  player.get("signed_year"),
         },
-        "position_comparables": comparables,
-        "market_year":   market_year,
+        "position_comparables":  comparables,
+        "market_year":           market_year,
+        # Trade-off framing (task #62): the incumbent profile + per-stat deltas
+        # let the model say "+0.080 OPS, -5 OAA vs Polanco" in the rationale.
+        # When None, the model falls back to comparables-only reasoning.
+        "incumbent_profile":     incumbent,
+        "improvement_deltas":    improvement_deltas,
     }
 
     if use_finetuned:
@@ -1150,19 +1822,34 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         find_matches = None
 
     # ── Step A+B: sequential local prep per gap (no LLM) ─────────────────────
+    # Task #62: incumbent-aware composite improvement scoring.
+    #   1. For each gap, identify the team's current incumbent at that position
+    #      and compute their offensive + defensive line.
+    #   2. Ask the matcher for a wider candidate pool (k=10) than we'll show, so
+    #      composite re-ranking has options.
+    #   3. Compute (offense, defense, pitching) deltas per candidate vs the
+    #      incumbent. The composite_score combines them weighted by the gap's
+    #      own offense/defense ratio from gap_components.
+    #   4. Re-sort by composite_score and take the top-3 to surface to the user.
+    #   5. Attach incumbent + deltas to the result so the UI can render the
+    #      "vs your current 2B Polanco" row and the LLM can articulate the
+    #      trade-off in each forecast rationale.
     _tick("Picking candidate targets + pricing comparables for the top-3 gaps")
     prepared_gaps: list[dict] = []
     for idx, gap in enumerate(diag.get("gaps", [])[:3], start=1):
         pos = gap.get("position")
         targets: list[dict] = []
         targets_source = "stat_fit"
+        # Pull a deeper pool than we'll display, so composite re-ranking has
+        # genuine options (not just 3 candidates fixed by the semantic step).
+        candidate_pool_k = 10
         if vs_ready and find_matches is not None:
             try:
                 targets = find_matches(
                     gap, contracts, batting, pitching,
                     evaluation_year=evaluation_year,
                     single_signing_ceiling=single_signing_ceiling,
-                    k=3,
+                    k=candidate_pool_k,
                 )
                 if targets:
                     targets_source = "vectorstore"
@@ -1171,7 +1858,36 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         if not targets:
             targets = _pick_targets(contracts, batting, pitching, pos,
                                     evaluation_year,
-                                    single_signing_ceiling, k=3)
+                                    single_signing_ceiling, k=candidate_pool_k)
+
+        # Compute the team's current incumbent at this position
+        incumbent = get_position_incumbent(
+            team_abbr, pos, batting, pitching,
+            oaa_df=oaa_df, catcher_df=catcher_df, sprint_df=sprint_df,
+        )
+
+        # Compute per-target improvement deltas vs incumbent + composite score
+        for t in targets:
+            deltas = _compute_improvement_deltas(
+                t, incumbent, gap, oaa_df=oaa_df, catcher_df=catcher_df,
+            )
+            t["vs_incumbent_offense"]  = deltas["vs_incumbent_offense"]
+            t["vs_incumbent_defense"]  = deltas["vs_incumbent_defense"]
+            t["vs_incumbent_pitching"] = deltas["vs_incumbent_pitching"]
+            t["composite_score"]       = deltas["composite_score"]
+            t["delta_breakdown"]       = deltas["breakdown"]
+
+        # Re-rank by composite improvement score. Tie-break by existing signal
+        # (semantic_score or fit_score) so the original matcher's preference
+        # is preserved when composite is unavailable (DH case) or tied.
+        def _rank_key(t: dict) -> tuple[float, float]:
+            comp = t.get("composite_score")
+            comp = -1e9 if comp is None else float(comp)
+            tiebreak = t.get("semantic_score") or t.get("fit_score") or 0.0
+            return (comp, float(tiebreak))
+        targets.sort(key=_rank_key, reverse=True)
+        targets = targets[:3]
+
         target_names = {t.get("player_name") for t in targets if t.get("player_name")}
         pricing_comparables = _pick_pricing_comparables(
             contracts, batting, pitching, pos, evaluation_year, k=3,
@@ -1183,6 +1899,7 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             "pos":                 pos,
             "targets":             targets,
             "targets_source":      targets_source,
+            "incumbent":           incumbent,
             "pricing_comparables": pricing_comparables,
         })
 
@@ -1209,21 +1926,78 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         return pg["idx"], est
 
     def _safe_forecast(idx: int, target: dict, pos: str,
-                       pricing_comparables: list[dict]) -> tuple[int, str, dict]:
+                       pricing_comparables: list[dict],
+                       incumbent: dict | None,
+                       gap: dict | None = None) -> tuple[int, str, dict]:
+        # Re-package the per-target deltas in the shape the LLM payload expects.
+        # IMPORTANT: only include fields whose deltas are actually known. If we
+        # send {"defense": null} the LLM tends to hallucinate a defense delta
+        # anyway ("gives back 5 OAA"). Omitting the key forces the LLM to leave
+        # that dimension out of the rationale.
+        improvement_deltas = None
+        if target.get("composite_score") is not None:
+            gc = (gap or {}).get("gap_components") or {}
+            improvement_deltas = {
+                "composite": target.get("composite_score"),
+                "breakdown": target.get("delta_breakdown", ""),
+            }
+            if target.get("vs_incumbent_offense") is not None:
+                improvement_deltas["offense"]  = target.get("vs_incumbent_offense")
+            if target.get("vs_incumbent_defense") is not None:
+                improvement_deltas["defense"]  = target.get("vs_incumbent_defense")
+            if target.get("vs_incumbent_pitching") is not None:
+                improvement_deltas["pitching"] = target.get("vs_incumbent_pitching")
+            if gc.get("offense") is not None:
+                improvement_deltas["gap_offense_weight"] = gc.get("offense")
+            if gc.get("defense") is not None:
+                improvement_deltas["gap_defense_weight"] = gc.get("defense")
+
+        # ── Layer 1: sanitize the incumbent so the LLM can't see incumbent
+        # stats it shouldn't be doing arithmetic on. If we don't carry a
+        # defense delta, strip the incumbent's defense block too.
+        clean_incumbent = _sanitize_incumbent_for_payload(incumbent, improvement_deltas)
+
         try:
             forecast = forecast_target_contract_llm(
                 target, pos, pricing_comparables, market_year=market_year,
+                incumbent=clean_incumbent, improvement_deltas=improvement_deltas,
             )
+            rationale = forecast.get("rationale", "")
+
+            # ── Layer 2: validate the LLM rationale against the deltas. If
+            # any number+unit phrase references a dimension the deltas don't
+            # carry (or disagrees with the known value beyond rounding
+            # tolerance), the rationale is hallucinating. Replace it with
+            # the programmatic version.
+            hallucinations = _rationale_hallucinations(rationale, improvement_deltas)
+            if hallucinations:
+                rationale = _programmatic_rationale(
+                    target, incumbent, improvement_deltas, gap
+                )
+                rationale_source = "programmatic_fallback"
+            else:
+                rationale_source = "llm"
+
             return idx, target["player_name"], {
-                "forecast_aav":       forecast.get("forecast_aav"),
-                "forecast_years":     forecast.get("forecast_years"),
-                "forecast_rationale": forecast.get("rationale", ""),
+                "forecast_aav":            forecast.get("forecast_aav"),
+                "forecast_years":          forecast.get("forecast_years"),
+                "forecast_rationale":      rationale,
+                "rationale_source":        rationale_source,
+                "rationale_hallucinations": hallucinations,
             }
         except Exception as e:                                  # noqa: BLE001
+            # ── Layer 3 (also covers total LLM failure): even with no LLM
+            # output, we can still give the user a deterministic rationale
+            # from the deltas.
+            fallback_rat = _programmatic_rationale(
+                target, incumbent, improvement_deltas, gap
+            ) if improvement_deltas else f"forecast unavailable ({type(e).__name__})"
             return idx, target["player_name"], {
-                "forecast_aav":       None,
-                "forecast_years":     None,
-                "forecast_rationale": f"forecast unavailable ({type(e).__name__})",
+                "forecast_aav":            None,
+                "forecast_years":          None,
+                "forecast_rationale":      fallback_rat,
+                "rationale_source":        "programmatic_fallback",
+                "rationale_hallucinations": [],
             }
 
     total_targets = sum(len(pg["targets"]) for pg in prepared_gaps)
@@ -1243,7 +2017,8 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         for pg in prepared_gaps:
             for target in pg["targets"]:
                 fc_futures.append(ex.submit(_safe_forecast, pg["idx"], target,
-                                            pg["pos"], pg["pricing_comparables"]))
+                                            pg["pos"], pg["pricing_comparables"],
+                                            pg.get("incumbent"), pg["gap"]))
         # Collect estimates
         for fut in est_futures:
             idx, est = fut.result()
@@ -1282,9 +2057,11 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         est_aav = estimate.get("estimated_aav")
         for t in targets:
             fc = forecasts_by_key.get((pg["idx"], t["player_name"]), {})
-            t["forecast_aav"]       = fc.get("forecast_aav")
-            t["forecast_years"]     = fc.get("forecast_years")
-            t["forecast_rationale"] = fc.get("forecast_rationale", "")
+            t["forecast_aav"]              = fc.get("forecast_aav")
+            t["forecast_years"]            = fc.get("forecast_years")
+            t["forecast_rationale"]        = fc.get("forecast_rationale", "")
+            t["rationale_source"]          = fc.get("rationale_source")
+            t["rationale_hallucinations"]  = fc.get("rationale_hallucinations", [])
             f_aav = t.get("forecast_aav")
             if est_aav and f_aav:
                 t["premium_vs_estimate"] = round(f_aav / est_aav - 1.0, 2)
@@ -1297,6 +2074,7 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             "gap": gap,
             "targets": targets,
             "targets_source": pg["targets_source"],
+            "incumbent": pg.get("incumbent"),
             "pricing_comparables": pricing_comparables,
             "estimate": estimate,
             "affordable": affordable,
