@@ -1430,3 +1430,58 @@ The 2B case is the clearest demo: Semien is the top composite at exactly the bud
 **Time: ~50 minutes.**
 
 ---
+
+---
+
+## Entry 30 — June 4 (Final build): UI visual check + LaTeX-bug fix
+
+**Task #65: open the live UI and verify Entries 25-29 render correctly.** I spun up the local Streamlit, drove it with Playwright, and captured five reference screenshots into ``docs/checkpoint3/entry29_*.png``. Everything from Entries 25 through 29 displays cleanly:
+
+- **Inputs row** now carries a third column for the "Committed payroll for 2025 (USD)" field, pre-filled from the Spotrac team-payroll CSV ($166,346,493 for SEA — the authoritative figure).
+- **Payroll Situation panel** renders as four `st.metric` tiles in a single row: Total Budget · Committed · Available room · Single-signing ceiling.
+- **Current Incumbent callout** appears above the contract estimate inside each gap card with the player's offensive line and OAA delta vs league.
+- **Tier badges** (BARGAIN green / AT BUDGET blue / PREMIUM orange) sit at the top of each target card and order cleanly within the gap (cheap-to-expensive).
+
+### One real bug caught and fixed: LaTeX rendering on dollar amounts
+
+Initial screenshot showed the pre-Diagnose live preview rendering as:
+
+> Committed: *166.3M from None tracked contracts ** Available:** ...
+
+The text between the first two `$` characters was being parsed as **LaTeX math mode** by Streamlit's markdown renderer, dropping into italic + monospace styling and breaking the surrounding bold formatting. Same vulnerability lurked in the Entry-27 over-committed error message.
+
+**Root cause:** Streamlit's `st.markdown` / `st.caption` / `st.error` all interpret `$...$` as LaTeX math delimiters. Every dollar-prefixed amount in any markdown string is at risk.
+
+**Fix:** rewrote the live-preview caption and the over-committed error to use `st.markdown(..., unsafe_allow_html=True)` with explicit HTML `<div>` styling. HTML rendering bypasses the markdown LaTeX parser entirely, so `$166.3M` displays as a literal dollar sign with the surrounding `<b>` tags rendering normally.
+
+Bonus polish caught in the same pass: the live-preview was showing "from None tracked contracts" when the Spotrac source path returned `n_contracts=None`. Updated to source-aware text: "from Spotrac team payroll" / "from N tracked contracts" / "no contracts on file" depending on which path produced the figure.
+
+### After the fix
+
+The live preview now reads:
+
+> **Committed:** $166.3M (from Spotrac team payroll)  ·  **Available:** $83.7M  ·  **Single-signing ceiling:** $25.1M (30% of available)
+
+Plain text, correct dollar signs, source-aware "from Spotrac team payroll" message, and the bold formatting renders correctly everywhere it should.
+
+### Reference screenshots committed for the final-report visual record
+
+- `entry29_01_inputs_with_committed_field.png` — three-column input row showing the new committed-payroll override
+- `entry29_02_inputs_after_set.png` — same row at $250M / $166M / SEA showing the post-fix live preview
+- `entry29_03_payroll_situation_panel.png` — four-tile metric panel
+- `entry29_04_top_gap_card_with_incumbent.png` — gap card with incumbent callout + three tier-badged targets
+- `entry29_05_full_page.png` — full-page scroll for layout audit
+
+### New artifact
+
+`demo/verify_gap_filler_ui.py` — Playwright-driven visual-check script. Launches the Gap Filler with SEA at $250M, captures the five reference screenshots above. Re-runnable any time a Gap Filler UI change lands.
+
+### Updated artifacts
+
+- `app/tabs/gap_filler.py` — caption + error rewritten to use HTML span via `unsafe_allow_html=True` (sidesteps the LaTeX math-mode interpretation of `$`)
+- `demo/verify_gap_filler_ui.py` — NEW (Playwright UI check)
+- `docs/checkpoint3/entry29_*.png` — 5 reference screenshots
+
+**Time: ~25 minutes (15 building + driving the script; 10 catching and fixing the LaTeX bug).**
+
+---

@@ -221,19 +221,36 @@ def render() -> None:
     available_preview = max(0, int(budget) - int(committed_override))
     ceiling_preview   = int(available_preview * 0.30)
 
-    payroll_caption = (
-        f"**Committed:** ${auto_committed/1e6:,.1f}M from {n_known} tracked "
-        f"contracts  ·  **Available:** ${available_preview/1e6:,.1f}M  ·  "
-        f"**Single-signing ceiling:** ${ceiling_preview/1e6:,.1f}M (30% of available)"
+    # NB: Streamlit markdown treats $...$ as LaTeX math delimiters which
+    # breaks rendering for any dollar-prefixed text. Rendering via st.markdown
+    # with unsafe_allow_html=True and an explicit HTML span bypasses the
+    # markdown parser entirely, so dollar amounts display literally and the
+    # rest of the line keeps its styling.
+    committed_origin = (
+        f"from Spotrac team payroll" if committed_info.get("committed_source") == "spotrac_team_payroll"
+        else f"from {n_known} tracked contracts" if n_known
+        else "no contracts on file"
     )
     if int(committed_override) > int(budget):
-        st.error(
-            f"Committed payroll (${int(committed_override)/1e6:,.1f}M) exceeds "
-            f"total budget (${int(budget)/1e6:,.1f}M). The tool will return "
-            f"zero affordable targets. Adjust either field."
+        st.markdown(
+            f"<div style='background:#FFEEEE;border:1px solid #E0B0B0;"
+            f"padding:8px 12px;border-radius:4px;margin-top:6px'>"
+            f"<b>Committed payroll (${int(committed_override)/1e6:,.1f}M)"
+            f" exceeds total budget (${int(budget)/1e6:,.1f}M).</b> "
+            f"The tool will return zero affordable targets. Adjust either field."
+            f"</div>",
+            unsafe_allow_html=True,
         )
     else:
-        st.caption(payroll_caption)
+        st.markdown(
+            f"<div style='color:#666;font-size:0.88em;margin-top:6px'>"
+            f"<b>Committed:</b> ${auto_committed/1e6:,.1f}M ({committed_origin})  ·  "
+            f"<b>Available:</b> ${available_preview/1e6:,.1f}M  ·  "
+            f"<b>Single-signing ceiling:</b> ${ceiling_preview/1e6:,.1f}M "
+            f"(30% of available)"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
 
     st.caption(
         f"Comparable contracts are filtered to signings on or before "
