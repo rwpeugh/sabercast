@@ -60,21 +60,28 @@ def _pull_season(season: int) -> list[dict]:
 
 
 def _normalize_rows(people: list[dict], season: int) -> list[dict]:
-    """Extract pitcher rows with the columns we need."""
+    """Extract player rows with handedness fields.
+
+    Originally pitcher-only. Extended to ALL active players (skipping only
+    those missing both throws and bats) so Roster Builder's hit-toward-weak-
+    defenders reasoning can look up hitter handedness too. The ``position``
+    field lets a downstream caller filter to one side if they want.
+    """
     rows = []
     for p in people:
         pos = (p.get("primaryPosition") or {}).get("abbreviation", "")
-        if pos != "P":
-            continue
-        hand = (p.get("pitchHand") or {}).get("code")
-        if not hand:
+        throws = (p.get("pitchHand") or {}).get("code")
+        bats   = (p.get("batSide") or {}).get("code")
+        # Skip players missing BOTH (rare; usually data-quality issues).
+        if not throws and not bats:
             continue
         rows.append({
             "season":     season,
             "mlbam_id":   p.get("id"),
             "name":       p.get("fullName"),
-            "throws":     hand,                                # R / L / S
-            "bats":       (p.get("batSide") or {}).get("code", ""),
+            "position":   pos,                                  # P / C / 1B / OF / etc.
+            "throws":     throws or "",                         # R / L / S / ""
+            "bats":       bats or "",                           # R / L / S / B / ""
             "birth_date": p.get("birthDate", ""),
             "debut":      p.get("mlbDebutDate", ""),
         })
@@ -89,7 +96,8 @@ def main() -> None:
         people = _pull_season(season)
         season_rows = _normalize_rows(people, season)
         all_rows.extend(season_rows)
-        print(f"{len(season_rows)} pitchers")
+        n_p = sum(1 for r in season_rows if r["position"] == "P")
+        print(f"{len(season_rows)} players ({n_p} pitchers, {len(season_rows)-n_p} hitters)")
         # Be polite to the public API
         time.sleep(0.5)
 
@@ -106,9 +114,11 @@ def main() -> None:
     df = df.sort_values("name").reset_index(drop=True)
 
     df.to_csv(OUT_PATH, index=False, encoding="utf-8")
+    n_p = (df["position"] == "P").sum()
     print()
-    print(f"saved {OUT_PATH}  ·  {len(df):,} pitchers")
+    print(f"saved {OUT_PATH}  ·  {len(df):,} players ({n_p:,} pitchers, {len(df)-n_p:,} hitters)")
     print(f"throws distribution:\n{df['throws'].value_counts().to_string()}")
+    print(f"bats distribution:\n{df['bats'].value_counts().to_string()}")
     print(f"file size: {OUT_PATH.stat().st_size / 1024:.1f} KB")
 
 

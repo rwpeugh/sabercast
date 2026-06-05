@@ -86,6 +86,143 @@ def _lookup_pitcher_hand(name: str) -> str | None:
     key = _ascii_fold(str(name)).lower()
     return _load_handedness().get(key)
 
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hitter handedness ("bats") -- same source as _load_handedness (player_handedness.csv
+# now carries hitters too as of Pipeline 01d v2). Roster Builder uses this for
+# hit-toward-weak-defenders reasoning combined with hitter spray profiles.
+# ──────────────────────────────────────────────────────────────────────────────
+_BATS_CACHE: dict[str, str] | None = None
+
+
+def _load_bats() -> dict[str, str]:
+    """Return a {ascii-folded-name: bats-code} lookup. Cached.
+    Codes: "R" / "L" / "S" (switch) / "B" (bat-side undetermined)."""
+    global _BATS_CACHE
+    if _BATS_CACHE is not None:
+        return _BATS_CACHE
+    p = Path(__file__).resolve().parent.parent / "data" / "raw" / "player_handedness.csv"
+    if not p.exists():
+        _BATS_CACHE = {}
+        return _BATS_CACHE
+    df = pd.read_csv(p, encoding="utf-8")
+    lookup: dict[str, str] = {}
+    for _, row in df.iterrows():
+        name = str(row.get("name", "")).strip()
+        bats = str(row.get("bats", "")).strip()
+        if not name or not bats or bats == "nan":
+            continue
+        lookup[_ascii_fold(name).lower()] = bats
+    _BATS_CACHE = lookup
+    return lookup
+
+
+def _lookup_hitter_bats(name: str) -> str | None:
+    """Look up a hitter's bat side. Returns "R" / "L" / "S" / "B" or None."""
+    if not name:
+        return None
+    return _load_bats().get(_ascii_fold(str(name)).lower())
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Hitter batted-ball profile (GB%, FB%, LD%, Pull%, Oppo%, etc) sourced from
+# Baseball Savant /leaderboard/batted-ball, written to data/raw/batted_ball_hitters_<year>.csv
+# by Pipeline 01e. Used in Roster Builder + Opponent Scouting (NOT Gap Filler --
+# the Savant 253-row cap doesn't cover bargain-tier candidates).
+# ──────────────────────────────────────────────────────────────────────────────
+_BATTED_BALL_CACHE: dict[int, dict[str, dict]] = {}
+
+
+def _load_batted_ball(year: int) -> dict[str, dict]:
+    """Return a {ascii-folded-name: profile-dict} lookup for the year. Cached."""
+    if year in _BATTED_BALL_CACHE:
+        return _BATTED_BALL_CACHE[year]
+    p = Path(__file__).resolve().parent.parent / "data" / "raw" / f"batted_ball_hitters_{year}.csv"
+    if not p.exists():
+        _BATTED_BALL_CACHE[year] = {}
+        return _BATTED_BALL_CACHE[year]
+    df = pd.read_csv(p, encoding="utf-8")
+    lookup: dict[str, dict] = {}
+    for _, row in df.iterrows():
+        name = str(row.get("name_human", "")).strip()
+        if not name:
+            continue
+        lookup[_ascii_fold(name).lower()] = {
+            "bbe":           int(row.get("bbe", 0) or 0),
+            "gb_pct":        round(float(row.get("gb_rate", 0) or 0) * 100, 1),
+            "air_pct":       round(float(row.get("air_rate", 0) or 0) * 100, 1),
+            "fb_pct":        round(float(row.get("fb_rate", 0) or 0) * 100, 1),
+            "ld_pct":        round(float(row.get("ld_rate", 0) or 0) * 100, 1),
+            "popup_pct":     round(float(row.get("pu_rate", 0) or 0) * 100, 1),
+            "pull_pct":      round(float(row.get("pull_rate", 0) or 0) * 100, 1),
+            "straight_pct":  round(float(row.get("straight_rate", 0) or 0) * 100, 1),
+            "oppo_pct":      round(float(row.get("oppo_rate", 0) or 0) * 100, 1),
+        }
+    _BATTED_BALL_CACHE[year] = lookup
+    return lookup
+
+
+def lookup_batted_ball_profile(name: str, year: int = 2024) -> dict | None:
+    """Look up a hitter's batted-ball profile for a season. Returns None if the
+    hitter isn't in Savant's qualified pool (<~250 PA)."""
+    if not name:
+        return None
+    return _load_batted_ball(year).get(_ascii_fold(str(name)).lower())
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Pitcher arsenal -- per-pitch type usage + effectiveness, sourced from
+# Baseball Savant /leaderboard/pitch-arsenal-stats, written to
+# data/raw/pitch_arsenal_<year>.csv by Pipeline 01f. Each pitcher has one entry
+# per pitch type they throw with min 100 pitches.
+# ──────────────────────────────────────────────────────────────────────────────
+_PITCH_ARSENAL_CACHE: dict[int, dict[str, list[dict]]] = {}
+
+
+def _load_pitch_arsenal(year: int) -> dict[str, list[dict]]:
+    """Return {ascii-folded-name: [pitch-entry, ...]} for the year. Cached."""
+    if year in _PITCH_ARSENAL_CACHE:
+        return _PITCH_ARSENAL_CACHE[year]
+    p = Path(__file__).resolve().parent.parent / "data" / "raw" / f"pitch_arsenal_{year}.csv"
+    if not p.exists():
+        _PITCH_ARSENAL_CACHE[year] = {}
+        return _PITCH_ARSENAL_CACHE[year]
+    df = pd.read_csv(p, encoding="utf-8")
+    lookup: dict[str, list[dict]] = {}
+    for _, row in df.iterrows():
+        name = str(row.get("name_human", "")).strip()
+        if not name:
+            continue
+        entry = {
+            "pitch_name":   str(row.get("pitch_name", "")).strip(),
+            "pitch_type":   str(row.get("pitch_type", "")).strip(),
+            "usage_pct":    round(float(row.get("pitch_usage_pct", 0) or 0), 1),
+            "pa_against":   int(row.get("pa_against", 0) or 0),
+            "ba":           round(float(row.get("ba", 0) or 0), 3),
+            "slg":          round(float(row.get("slg", 0) or 0), 3),
+            "whiff_pct":    round(float(row.get("whiff_pct", 0) or 0), 1),
+            "k_pct":        round(float(row.get("k_pct", 0) or 0), 1),
+            "est_ba":       round(float(row.get("est_ba", 0) or 0), 3),
+            "est_slg":      round(float(row.get("est_slg", 0) or 0), 3),
+            "hard_hit_pct": round(float(row.get("hard_hit_pct", 0) or 0), 1),
+        }
+        lookup.setdefault(_ascii_fold(name).lower(), []).append(entry)
+    # Sort each pitcher's arsenal by usage descending so the primary pitch is first
+    for key, arsenal in lookup.items():
+        arsenal.sort(key=lambda x: x.get("usage_pct", 0), reverse=True)
+    _PITCH_ARSENAL_CACHE[year] = lookup
+    return lookup
+
+
+def lookup_pitcher_arsenal(name: str, year: int = 2024) -> list[dict] | None:
+    """Look up a pitcher's full arsenal for a season. Returns a list of pitch-
+    type dicts (sorted by usage descending) or None if the pitcher isn't in
+    Savant's qualified pool (under ~100 pitches per type)."""
+    if not name:
+        return None
+    return _load_pitch_arsenal(year).get(_ascii_fold(str(name)).lower())
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Paths and constants
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1533,6 +1670,27 @@ the opponent's full 2024 season aggregates (offense + pitching), the per-team
 league averages, and per-stat deltas, plus the names and 2024 lines of their
 top hitters and pitchers.
 
+OPTIONAL enrichment on each top_hitter entry:
+  * ``bats`` ("R" | "L" | "S" | "B" | null) -- bat side.
+  * ``batted_ball`` -- dict with gb_pct, fb_pct, ld_pct, popup_pct,
+    pull_pct, straight_pct, oppo_pct. When present, use it for threat
+    cards ("Aaron Judge: 43% Pull RHH, defend hard pull-side LF / 5.5
+    hole") and to inform pitching_strategy / hitting_approach. If null,
+    the hitter isn't in Savant's qualified pool -- describe them from
+    their stat line alone.
+
+OPTIONAL enrichment on each top_pitcher entry:
+  * ``throws`` ("R" | "L" | null) -- throwing hand.
+  * ``arsenal`` -- list of pitch-type entries sorted by usage desc, each
+    with pitch_name, usage_pct, ba, slg, whiff_pct, est_ba, est_slg,
+    hard_hit_pct. Use this to:
+      - In threat cards for pitchers: describe their go-to weapon and
+        their weakest pitch ("Snell: 41% slider with 35% whiff is elite;
+        18% changeup .280 BA against is the hittable pitch").
+      - In hitting_approach: tell our hitters which pitch type to look for
+        and which counts to attack in.
+    If null, describe from ERA/WHIP/K9 alone.
+
 Return STRICT JSON only, no prose, with this exact schema:
 
 {
@@ -2520,6 +2678,37 @@ best starting lineup against a specific opponent. You receive:
     When ``probable_starter`` is null entirely, reason about the staff as a
     whole.
 
+    OPTIONAL on ``probable_starter``: when ``arsenal`` is present, it's a
+    list of pitch-type entries sorted by usage descending. Each entry has
+    ``pitch_name`` (e.g. "4-Seam Fastball", "Slider", "Changeup"),
+    ``usage_pct`` (% of pitches that are this type), ``ba``, ``slg``,
+    ``whiff_pct``, ``est_ba``, ``est_slg``, ``hard_hit_pct``. Use this to
+    describe what the pitcher actually throws and how each pitch performs:
+    "Cole's 4-seam (45% usage, .184 BA against, 24% whiff) is elite; his
+    changeup (16% usage, .265 BA, 22% whiff) is the hittable pitch." If
+    arsenal is null, the pitcher's qualifying pitches aren't in our data
+    (Savant requires ~100 thrown per pitch type) -- don't invent pitch
+    types or velocities; reason from ERA/WHIP/K9 alone.
+
+OPTIONAL on each team_hitter entry:
+  * ``bats`` ("R" | "L" | "S" | "B" | null) -- hitter's bat side. Use for
+    platoon stacking (oppo-handed vs probable_starter goes in 1-5).
+  * ``batted_ball`` -- dict with gb_pct, fb_pct, ld_pct, popup_pct,
+    pull_pct, straight_pct, oppo_pct. When present, use it for:
+      1. GIDP avoidance: don't slot a >55% GB hitter behind a slow runner
+         or in cleanup; move them to leadoff or bottom of the order.
+      2. Hit-toward-weak-defenders: cross-reference each hitter's spray
+         tendency with the opponent's per-position OAA. RHH pulling sends
+         balls to LF/SS/3B; LHH pulling sends to RF/2B/1B; oppo goes the
+         other way. If the opponent has a -OAA position, prefer hitters
+         whose spray tendency sends balls THERE -- they exploit the weak
+         defender.
+      3. Mention these reasoning steps in rationales and matchup_advantages
+         when they actually drove a slotting decision. Don't pad rationales
+         with batted-ball language that didn't influence the lineup.
+    When ``batted_ball`` is null, skip those reasoning steps for that
+    hitter -- the data isn't available (below Savant's ~250 PA cutoff).
+
 Return STRICT JSON only, no prose, with this exact schema:
 
 {
@@ -2631,6 +2820,15 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
     team_hitters     = _top_hitters(team_bat_df,  n=12)
     opponent_pitchers = _top_pitchers(opp_pit_df, n=5)
 
+    # Tier 1 enrichment (Entry 34): attach batted-ball profile + bats handedness
+    # to every team hitter. Lets the LLM reason about GIDP risk and hit-toward-
+    # weak-defender matchups when ordering the lineup. Missing data (player
+    # below Savant's ~250-PA qualified cutoff) leaves the fields as None --
+    # the LLM is instructed to skip those dimensions when not available.
+    for h in team_hitters:
+        h["bats"]         = _lookup_hitter_bats(h.get("name", ""))
+        h["batted_ball"]  = lookup_batted_ball_profile(h.get("name", ""), evaluation_year)
+
     probable_starter: dict | None = None
     if probable_pitcher:
         probable_starter = _lookup_pitcher_row(probable_pitcher, opp_pit_df)
@@ -2638,6 +2836,12 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
             _tick(f"Warning: probable starter '{probable_pitcher}' not found on "
                   f"{opponent_abbr}'s {evaluation_year} pitching roster — falling "
                   f"back to staff-level reasoning")
+        else:
+            # Attach the pitcher's full Savant arsenal (one entry per pitch type)
+            # so the LLM can describe what they throw + how each pitch performs.
+            probable_starter["arsenal"] = lookup_pitcher_arsenal(
+                probable_starter["name"], evaluation_year
+            )
 
     opponent_defense_deltas: dict | None = None
     if oaa_df is not None and sprint_df is not None:
@@ -2717,6 +2921,18 @@ def run_opponent_scouting_simple(opponent_abbr: str = "HOU",
 
     top_hitters  = _top_hitters(team_bat_df, n=5)
     top_pitchers = _top_pitchers(team_pit_df, n=5)
+
+    # Tier 1 enrichment (Entry 34): attach Savant data to each top hitter and
+    # pitcher so the scouting LLM can produce sharper threat / weakness / pitching-
+    # strategy / hitting-approach cards. The new fields (bats, batted_ball,
+    # arsenal, throws) let the model cite spray tendencies, GIDP risk, and
+    # per-pitch effectiveness instead of just OPS / ERA.
+    for h in top_hitters:
+        h["bats"]        = _lookup_hitter_bats(h.get("name", ""))
+        h["batted_ball"] = lookup_batted_ball_profile(h.get("name", ""), evaluation_year)
+    for p in top_pitchers:
+        p["throws"]      = _lookup_pitcher_hand(p.get("name", ""))
+        p["arsenal"]     = lookup_pitcher_arsenal(p.get("name", ""), evaluation_year)
 
     _tick(f"Asking GPT-4o to scout {opponent_abbr}'s strengths, weaknesses, and how to attack them")
     report = scout_opponent_llm(

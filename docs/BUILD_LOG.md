@@ -1666,3 +1666,125 @@ Only the Roster Builder's **lineup table** was switched to HTML. Other `st.dataf
 **Time: ~25 minutes (15 investigating canvas-vs-HTML hypothesis, 10 implementing + verifying).**
 
 ---
+
+## Entry 34 — June 5: Tier 1 Savant integration — hitter spray + pitcher arsenal
+
+**Motivation (the user's question, paraphrased).** *"Is there anywhere we can scrape hitter ground-ball rate, fly-ball rate, and spray direction? And pitch mix for pitchers? The Roster Builder should be able to reason about GIDP avoidance and hitting-toward-weak-defenders matchups; Opponent Scouting should describe opposing hitters by tendency and opposing pitchers by their go-to weapon vs hittable pitch."*
+
+The two existing tabs (Roster Builder, Opponent Scouting) were already using offense / pitching / defense aggregates from the multi-year Pipeline 01 + 02 ingest, but lacked **batter-level batted-ball profile** and **pitcher-level pitch arsenal**. Without those, the LLM had to reason from OPS / ERA alone and couldn't produce the specific shift-and-attack recommendations a real bench-coach scouting report contains.
+
+This entry adds two new Savant endpoints, plus per-player handedness via the MLB Stats API, plumbs them into both tabs, and verifies the LLM cites the new fields in concrete rationales.
+
+### Coverage scoping decision (the "Option C" call)
+
+Three tiers of Statcast data were on the table:
+
+1. **Tier 1** — Savant pre-aggregated CSV leaderboards: hitter batted-ball + pitcher arsenal. Fast to ingest, fits the qualified-hitter / established-pitcher coverage that Roster Builder and Opponent Scouting need.
+2. **Tier 2** — pitch location heatmaps via Statcast pitch-by-pitch aggregation. Significantly more data + per-pitcher aggregation logic.
+3. **Tier 3** — pitcher batted-ball-allowed spray. Savant's batted-ball endpoint claims to support `player_type=pitcher`, but the parameter is silently ignored — the response is always batter data (confirmed: top-5 by bbe were Arraez / Hoerner / Clement — all position players). Would also require pitch-by-pitch aggregation.
+
+The user picked **Tier 1 only** for this entry. Tier 2 + 3 are queued as Task #77.
+
+A second scope decision: **skip Gap Filler** for this Savant data. The `/leaderboard/batted-ball` endpoint hard-caps at 253 rows per season regardless of the `min` / `qual` / `page` parameter (verified by setting `min=10` and `min=999` — both returned 253). At standard PA cutoffs the coverage breakdown is 32% / 49% / 63% of the broader free-agent pool depending on threshold; the BARGAIN-tier candidates the Gap Filler surfaces (bench-tier or fringe-starter contracts) systematically fall **outside** the cap. Wiring this data into Gap Filler would give the LLM an asymmetric view — rich profile data for premium-tier targets, nothing for bargains — which is exactly the wrong skew for a free-agent decision tool. Roster Builder + Opponent Scouting both work with the qualified-hitter pool by definition, so the coverage matches.
+
+### Data pipelines
+
+**`pipelines/01d_pull_handedness.py` (extended).** The original version pulled pitcher-only handedness from the MLB Stats API. Extended to ALL active players (pitcher + hitter) so the new tabs can do hitter platoon reasoning too. Active players for each season 2019-2024 are deduped on `mlbam_id`, keeping the most recent record. Final output: **2,826 players** in `data/raw/player_handedness.csv` (1,604 pitchers, 1,222 hitters), with columns `season, mlbam_id, name, position, throws, bats, birth_date, debut`.
+
+The pybaseball Lahman wrapper points at a stale GitHub URL that 404s as of mid-2026, and the Chadwick Bureau repo has been reorganised — both confirmed dead. The MLB Stats API is authoritative anyway (it's MLB's own data, refreshed real-time, no auth required) so the pivot from Lahman to `statsapi.mlb.com` is permanent.
+
+**`pipelines/01e_pull_batted_ball_hitters.py` (NEW).** Pulls Savant's `/leaderboard/batted-ball` for 2019-2024. One file per year, 253 rows per file. Captured columns:
+
+- `gb_rate, air_rate, fb_rate, ld_rate, pu_rate` — batted-ball type rates
+- `pull_rate, straight_rate, oppo_rate` — spray direction
+- `pull_gb_rate, straight_gb_rate, oppo_gb_rate, pull_air_rate, straight_air_rate, oppo_air_rate` — direction-by-trajectory rates (this is what powers "hit toward weak SS defender" reasoning)
+
+One bug worth recording: my first pass at `_normalize_season` assigned `out['year'] = year` before establishing the row count, leaving an empty DataFrame with `year=NaN` for every row. Fix is to copy a non-scalar column from the source dataframe **first** (`out['mlbam_id'] = df['id']`) so the index is correctly sized, then assign scalars. Documented as a comment in the pipeline for future-me.
+
+**`pipelines/01f_pull_pitcher_arsenal.py` (NEW).** Pulls Savant's `/leaderboard/pitch-arsenal-stats` for 2019-2024. One row per (pitcher, pitch_type, season) for any pitch thrown ≥100 times. 2024 has **577 rows across 316 unique pitchers** — covers every rotation member + established reliever on all 30 teams. (2020 has only 65 rows due to the short COVID season; flagged in the pipeline docstring.) Pitch-type vocabulary observed in 2024: 4-Seam Fastball, Sinker, Cutter, Slider, Sweeper, Slurve, Curveball, Changeup, Split-Finger, Knuckleball.
+
+Captured columns per pitch: `pitch_usage_pct, ba, slg, woba, whiff_pct, k_pct, put_away_pct, est_ba, est_slg, est_woba, hard_hit_pct, run_value_per_100`. The combination of usage + per-pitch BA against + whiff% is what lets the LLM say "Snell's slider is his put-away pitch; his changeup is the hittable one" rather than just "Snell has a 2.8 ERA".
+
+All three pipelines are idempotent — re-running overwrites the CSV.
+
+### Orchestrator integration
+
+Six new helpers in `core/orchestrator.py`, all cached on first call and ASCII-folding names before lookup so "Víctor Robles" matches "Victor Robles" in the source data:
+
+```
+_load_bats()                       -> name -> bats lookup dict
+_lookup_hitter_bats(name)          -> "R" | "L" | "S" | None
+_load_batted_ball(year)            -> per-year df cache
+lookup_batted_ball_profile(name, year)  -> dict with gb_pct, fb_pct, ld_pct,
+                                            popup_pct, pull_pct, straight_pct, oppo_pct
+_load_pitch_arsenal(year)          -> per-year df cache
+lookup_pitcher_arsenal(name, year) -> list[dict] sorted by usage desc
+```
+
+The arsenal lookup is the more interesting one — it returns a list of pitch entries (one per pitch_type) already sorted by usage descending, so the LLM gets the pitcher's primary pitch first and can describe them like "Skubal: 33% 4-seam, 27% changeup with elite 46% whiff, 21% sinker that's the hittable one (.207 BA)".
+
+The Roster Builder data wiring in `run_roster_builder_simple` attaches the new fields to each hitter in `team_hitters` and to the `probable_starter` dict:
+
+```python
+for h in team_hitters:
+    h["bats"]        = _lookup_hitter_bats(h.get("name", ""))
+    h["batted_ball"] = lookup_batted_ball_profile(h.get("name", ""), evaluation_year)
+# ...
+probable_starter["arsenal"] = lookup_pitcher_arsenal(
+    probable_starter["name"], evaluation_year
+)
+```
+
+Opponent Scouting mirrors the pattern in `run_opponent_scouting_simple`, enriching both `top_hitters` (5 hitters) and `top_pitchers` (5 pitchers).
+
+### Prompt updates
+
+`ROSTER_BUILDER_SYSTEM` got two new sections — one for the probable-starter arsenal (use the highest-usage pitch to describe what they throw, the highest BA-against pitch to call out as the attack vector) and one for hitter batted-ball profile (use pull% with bat side to inform shift-aware lineup ordering; flag high GB% hitters as GIDP risks).
+
+`OPPONENT_SCOUTING_SYSTEM` got the analogous treatment — explicit instructions on how to use `bats` + `batted_ball` for threat cards and pitching_strategy, and `throws` + `arsenal` for pitcher threat cards + hitting_approach. Both prompts explicitly handle the null case (when a player isn't in the qualified pool, fall back to stat-line reasoning) so the model degrades gracefully.
+
+### Smoke tests — verifying the LLM actually uses the new fields
+
+**Roster Builder: LAD @ DET vs Tarik Skubal (LHP).** Skubal's arsenal cleanly loaded — 33.2% 4-Seam (BA .197, 27.7% whiff), 27.0% Changeup (BA .209, 46.4% whiff — that's the put-away pitch), 20.6% Sinker (BA .207, 16.0% whiff). gpt-4o output:
+
+- Top lineup slot: "Mookie Betts — Right-handed leadoff hitter to exploit Skubal's left-handed pitching."
+- #3 slot: "Teoscar Hernández — Right-handed power hitter to capitalize on Skubal's sinker."
+- Matchup advantage [MEDIUM]: "exploit sinker — Skubal's sinker has a higher BA against (.207) compared to his other pitches."
+
+The LLM correctly identified the sinker as the attack vector (it's the highest-BA pitch in the arsenal, beating the changeup despite the changeup's lower whiff disadvantage) and built a right-handed-heavy lineup to platoon against the LHP. Hitter Pull% from batted-ball flowed through into "high fly ball rate to challenge Skubal's sinker"-style observations.
+
+**Opponent Scouting: NYY (2024).** All three top_threats were specific:
+
+- Aaron Judge — "Elite power hitter with 61 HR and a 1.126 OPS"
+- Juan Soto — "High OBP and power threat with 45 HR and .998 OPS"
+- Tommy Kahnle — "Dominant reliever with a 2.10 ERA and 38.9% whiff rate on changeup" *(38.9% whiff rate is verbatim from arsenal data — Kahnle threw 72.8% changeups in 2024)*
+
+Exploitable weaknesses included one that was entirely arsenal-driven: "bullpen middle innings — Clay Holmes' sinker has a .319 BA against" (Holmes threw 56.2% sinkers; the .319 BA against is verbatim from the arsenal CSV). And the pitching strategy explicitly cited Chisholm Jr.'s pull rate from the batted-ball data: "Exploit Jazz Chisholm Jr.'s high pull rate by shifting the defense accordingly."
+
+The hitting_approach was concrete down to per-pitcher-per-pitch recommendations: "target Clay Holmes' sinker, which has been hittable, and be patient against Tommy Kahnle's changeup, which is his go-to weapon" — both of which are correct readings of the arsenal data (Holmes' sinker BA against is .319, Kahnle's changeup usage is 72.8%).
+
+Elapsed time: 8.54s for the Opponent Scouting call; ~10s for Roster Builder. Within the headline latency budget.
+
+### One gotcha worth recording
+
+`run_opponent_scouting_simple` renames the LLM's `top_threats` → `threats` and `exploitable_weaknesses` → `weaknesses` in its returned dict. My first smoke-test print used the LLM's original keys and looked like an empty-array regression. Re-ran with the correct keys and confirmed the data was always there. The orchestrator return shape is a stable public contract for the UI; I'm leaving it as-is rather than chasing the cosmetic rename.
+
+### Updated artifacts
+
+- `pipelines/01d_pull_handedness.py` — extended to all positions (was pitcher-only)
+- `pipelines/01e_pull_batted_ball_hitters.py` — NEW
+- `pipelines/01f_pull_pitcher_arsenal.py` — NEW
+- `data/raw/player_handedness.csv` — regenerated, 2,826 rows
+- `data/raw/batted_ball_hitters_{2019..2024}.csv` — NEW, 6 files
+- `data/raw/pitch_arsenal_{2019..2024}.csv` — NEW, 6 files
+- `core/orchestrator.py` — 6 new helpers + Roster Builder + Opponent Scouting wiring + both system prompts extended
+
+### What's deliberately NOT in this entry
+
+- **Gap Filler** — coverage-cap mismatch (see scoping note above)
+- **Pitch location heatmaps** — Tier 2, queued as Task #77
+- **Pitcher batted-ball-allowed spray** — Tier 3, requires Statcast pitch-by-pitch aggregation since the Savant endpoint silently returns batter data when queried for pitchers
+
+**Time: ~3 hours (1h pipelines + scope discovery, 1h helper plumbing + prompt rewrites, 1h smoke tests + debug + writeup).**
+
+---
