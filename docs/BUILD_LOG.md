@@ -1350,3 +1350,83 @@ Test 10 (incumbent-aware composite) also got a budget bump from $165M → $250M 
 **Time: ~50 minutes.**
 
 ---
+
+---
+
+## Entry 29 — June 4 (Final build): Tiered recommendations (bargain / medium / premium)
+
+**The framing change.** Up through Entry 28, every Gap Filler card returned the top-3 candidates by composite improvement, all under the single-signing ceiling. The math was right but the *information design* was wasted: in any given gap, the three top picks usually clustered around the same price point. A GM looking at three $20M-AAV recommendations gets one decision to make ("do I want to spend $20M here?"), not three.
+
+User asked for the natural fix: turn each card into a price-tier comparison. One **bargain** option (well under budget), one **at-budget** option (using the full ceiling), and one **premium** stretch pick (above the ceiling). Now each card asks three different questions — "should I go cheap, fair, or stretch?" — and the GM gets nine distinct trade-offs to weigh across three gaps instead of three flavours of the same trade-off.
+
+### Tier definitions (relative to ``single_signing_ceiling``)
+
+| Tier | AAV band | Intent |
+|---|---|---|
+| **Bargain** | `0 < AAV ≤ 50% × ceiling` | Good-value play; large room left over for other moves |
+| **At budget** | `50% × ceiling < AAV ≤ ceiling` | Best fit at exactly the budget the math allows |
+| **Premium** | `ceiling < AAV ≤ max(5 × ceiling, $30M)` | Stretch pick; over-budget but with the best composite improvement |
+
+The $30M floor on the premium cap matters for over-committed teams (ceiling=$0 → otherwise no premium tier). With it, even over-committed teams see actionable premium candidates.
+
+### Implementation
+
+1. **Constants and helpers** added to `core/orchestrator.py`:
+   - `TIER_BARGAIN_RATIO = 0.50` · `TIER_PREMIUM_RATIO = 5.0` · `TIER_PREMIUM_MIN_CAP = 30M`
+   - `_classify_target_tier(aav, ceiling)` -> `"bargain" | "medium" | "premium"`
+   - `_pick_top_per_tier(targets, ceiling, max_per_tier=1)` buckets candidates, returns top-1 per tier ordered bargain→medium→premium
+
+2. **Candidate pool widened.** `run_gap_filler_simple` now passes a tier-pool ceiling of `max(5 × single_signing_ceiling, $30M)` to `find_matches` / `_pick_targets` (up from just the ceiling itself). That guarantees the premium tier has real candidates to surface instead of getting filtered out before composite scoring.
+
+3. **Over-committed special case.** When ceiling = $0, bargain and medium are empty by construction. The picker falls back to top-3 premium candidates so the user still sees actionable recommendations alongside the `over_committed=True` warning the orchestrator already surfaces.
+
+4. **UI badges** in `app/tabs/gap_filler.py`. Each target card now opens with a colored tier chip:
+   - `BARGAIN` (green, `#2E863E` on `#E8F4EA`)
+   - `AT BUDGET` (blue, `#3A82CD` on `#E6EFF8`)
+   - `PREMIUM` (orange, `#C26B1F` on `#FBEFE3`)
+
+   The source label below the gap header is rewritten to acknowledge the new behavior: *"retrieved by ChromaDB semantic match, then bucketed into bargain / at-budget / premium tiers with the top-1 by composite improvement picked per tier."*
+
+### Real output (SEA, $250M budget — leaves $25.1M ceiling)
+
+```
+2B gap (incumbent: Jorge Polanco, OPS .651, OAA -11)
+  [BARGAIN]   Brandon Lowe       $ 4.0M    composite 1.89
+  [AT BUDGET] Marcus Semien      $25.0M    composite 4.03   (top fit)
+  [PREMIUM]   Xander Bogaerts    $25.5M    composite 2.29
+
+RF gap (incumbent: Mitch Haniger, OPS .620, OAA -5)
+  [BARGAIN]   Randal Grichuk     $ 2.0M    composite 1.42
+  [PREMIUM]   Mike Trout         $35.5M    composite 1.37
+              (no medium-tier candidate found)
+
+DH gap (incumbent: None - DH path)
+  [BARGAIN]   J.D. Martinez      $12.0M
+  [AT BUDGET] Masataka Yoshida   $18.0M
+  [PREMIUM]   Shohei Ohtani      $70.0M
+```
+
+The 2B case is the clearest demo: Semien is the top composite at exactly the budget; Lowe is a real bargain alternative at 1/6 the price with most of the upside; Bogaerts is the natural premium stretch. A GM can now articulate the trade-off across all three to their owner instead of having to sell only the top-fit pick.
+
+### Smoke suite
+
+- **Test 11 updated.** Bargain/medium tiers must honor the ceiling (no AAV > ceiling for those tiers); premium tier intentionally above. Over-committed case now asserts the premium-fallback behavior (was previously expecting zero targets).
+- **Test 12 added.** Four sub-checks: each target carries a valid tier field, tier matches the AAV/ceiling rule via the same classifier the orchestrator uses, ordering within a gap is bargain→medium→premium, over-committed case still returns premium-tier recommendations.
+
+**Final: 26 passed · 1 warned · 0 failed.**
+
+### Notes on design choices
+
+- **Why top-1 per tier instead of top-N?** Three cards × three gaps = nine recommendations total. Going to N=2 per tier (18 total) overwhelms the page and dilutes the trade-off framing. The buyer wants the *best* representative of each price point, not a long list.
+- **Why the 5× premium multiplier?** Smaller values (2-3×) often left the premium tier empty for teams with tight ceilings. 5× consistently surfaces a real stretch candidate without drifting into "Ohtani for everyone" — the candidate pool is still bounded by position eligibility, no-look-ahead, and the absolute $30M floor on the cap.
+- **Why composite-best per tier, not AAV-anchored?** The whole point of Entry 25's composite-improvement scoring was to rank candidates by *fit-for-this-gap*, not by raw stat quality. Within a tier, we still want the best composite — the tier just slices the price point.
+
+### Updated artifacts
+
+- `core/orchestrator.py` — `_classify_target_tier`, `_pick_top_per_tier`, tier constants; `run_gap_filler_simple` candidate-pool widening + tier replacement of the simple top-3 cut
+- `app/tabs/gap_filler.py` — tier badge per target card, rewritten source-label to describe tier behavior
+- `demo/smoke_test_edge_cases.py` — Test 11 updates (premium-allowed-above-ceiling, premium-fallback for over-committed) + new Test 12 (tier invariants)
+
+**Time: ~50 minutes.**
+
+---

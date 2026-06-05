@@ -113,6 +113,83 @@ TEAM_ABBR_TO_BREF: dict[str, str] = {
 GAP_POSITIONS = ["C", "1B", "2B", "3B", "SS", "LF", "CF", "RF", "DH", "SP", "RP"]
 
 
+# Tier thresholds for the bargain / medium / premium recommendation slots.
+# Defined as multiples of the single-signing ceiling.
+#   bargain: 0 < AAV <= TIER_BARGAIN_RATIO * ceiling        ("well under budget")
+#   medium:  TIER_BARGAIN_RATIO * ceiling < AAV <= ceiling  ("at budget")
+#   premium: ceiling < AAV <= TIER_PREMIUM_RATIO * ceiling  ("above budget")
+#
+# Premium also has an absolute cap (max of the multiplicative cap or
+# TIER_PREMIUM_MIN_CAP) so we still surface premium candidates when the
+# single-signing ceiling is near zero (over-committed teams). Without this
+# floor, over-committed teams would see no premium tier at all.
+TIER_BARGAIN_RATIO     = 0.50         # bargain = at most half the ceiling
+TIER_PREMIUM_RATIO     = 5.0          # premium upper bound = 5x ceiling
+TIER_PREMIUM_MIN_CAP   = 30_000_000   # ...but always cover up to $30M
+TIER_ORDER             = ("bargain", "medium", "premium")
+
+
+def _classify_target_tier(aav: float | None,
+                            single_signing_ceiling: float) -> str:
+    """Bucket a candidate's AAV into ``bargain`` / ``medium`` / ``premium``.
+
+    The ceiling is the GM's already-computed single-signing ceiling
+    (30% of available room after committed payroll). For over-committed
+    teams (ceiling <= 0), every candidate is considered "premium" since
+    nothing fits under-budget.
+    """
+    if aav is None or aav <= 0:
+        return "premium"
+    if single_signing_ceiling <= 0:
+        return "premium"
+    if aav <= TIER_BARGAIN_RATIO * single_signing_ceiling:
+        return "bargain"
+    if aav <= single_signing_ceiling:
+        return "medium"
+    return "premium"
+
+
+def _pick_top_per_tier(targets: list[dict],
+                        single_signing_ceiling: float,
+                        max_per_tier: int = 1) -> list[dict]:
+    """Pick the best ``max_per_tier`` candidates from each AAV tier by
+    composite improvement score. Returns them in bargain→medium→premium order.
+
+    Over-committed special case: when the ceiling is zero, bargain and medium
+    are empty by construction. In that case we fall back to returning the
+    top-3 premium candidates so the user still gets recommendations (with the
+    "over-committed" warning surfaced via ``over_committed`` upstream).
+    """
+    for t in targets:
+        t["tier"] = _classify_target_tier(t.get("aav"), single_signing_ceiling)
+
+    def _rank_key(t: dict) -> tuple[float, float]:
+        comp = t.get("composite_score")
+        comp = -1e9 if comp is None else float(comp)
+        tiebreak = t.get("semantic_score") or t.get("fit_score") or 0.0
+        return (comp, float(tiebreak))
+
+    ordered: list[dict] = []
+    for tier in TIER_ORDER:
+        tier_pool = [t for t in targets if t.get("tier") == tier]
+        tier_pool.sort(key=_rank_key, reverse=True)
+        ordered.extend(tier_pool[:max_per_tier])
+
+    # Over-committed: ceiling is 0 -> bargain/medium are empty -> top up to 3
+    # from premium so the user sees something actionable.
+    if single_signing_ceiling <= 0 and len(ordered) < 3:
+        premium_pool = [t for t in targets if t.get("tier") == "premium"]
+        premium_pool.sort(key=_rank_key, reverse=True)
+        seen_names = {t.get("player_name") for t in ordered}
+        for t in premium_pool:
+            if t.get("player_name") in seen_names:
+                continue
+            ordered.append(t)
+            if len(ordered) >= 3:
+                break
+    return ordered
+
+
 # Rough 2025 payroll defaults per team (in USD). Used as the initial value for
 # the editable payroll input on the Gap Filler tab. Sourced from public
 # tracking (Spotrac, Cot's). These are approximate end-of-2024 payroll levels —
@@ -2000,19 +2077,26 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
     #      trade-off in each forecast rationale.
     _tick("Picking candidate targets + pricing comparables for the top-3 gaps")
     prepared_gaps: list[dict] = []
+    # Candidate pool ceiling = the premium-tier upper bound. We retrieve all
+    # candidates up to ``5 * single_signing_ceiling`` (floored at $30M for
+    # over-committed teams) so the bargain / medium / premium bucketing has
+    # genuine candidates in every tier rather than only at-budget players.
+    tier_pool_ceiling = max(
+        single_signing_ceiling * TIER_PREMIUM_RATIO,
+        TIER_PREMIUM_MIN_CAP,
+    )
     for idx, gap in enumerate(diag.get("gaps", [])[:3], start=1):
         pos = gap.get("position")
         targets: list[dict] = []
         targets_source = "stat_fit"
-        # Pull a deeper pool than we'll display, so composite re-ranking has
-        # genuine options (not just 3 candidates fixed by the semantic step).
-        candidate_pool_k = 10
+        # Pull a deeper pool so each tier has real options to pick from.
+        candidate_pool_k = 20
         if vs_ready and find_matches is not None:
             try:
                 targets = find_matches(
                     gap, contracts, batting, pitching,
                     evaluation_year=evaluation_year,
-                    single_signing_ceiling=single_signing_ceiling,
+                    single_signing_ceiling=tier_pool_ceiling,
                     k=candidate_pool_k,
                 )
                 if targets:
@@ -2022,7 +2106,7 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         if not targets:
             targets = _pick_targets(contracts, batting, pitching, pos,
                                     evaluation_year,
-                                    single_signing_ceiling, k=candidate_pool_k)
+                                    tier_pool_ceiling, k=candidate_pool_k)
 
         # Compute the team's current incumbent at this position
         incumbent = get_position_incumbent(
@@ -2041,16 +2125,12 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             t["composite_score"]       = deltas["composite_score"]
             t["delta_breakdown"]       = deltas["breakdown"]
 
-        # Re-rank by composite improvement score. Tie-break by existing signal
-        # (semantic_score or fit_score) so the original matcher's preference
-        # is preserved when composite is unavailable (DH case) or tied.
-        def _rank_key(t: dict) -> tuple[float, float]:
-            comp = t.get("composite_score")
-            comp = -1e9 if comp is None else float(comp)
-            tiebreak = t.get("semantic_score") or t.get("fit_score") or 0.0
-            return (comp, float(tiebreak))
-        targets.sort(key=_rank_key, reverse=True)
-        targets = targets[:3]
+        # Bucket by AAV tier (bargain / medium / premium) and pick top-1 per
+        # tier by composite improvement score. Result is ordered bargain ->
+        # medium -> premium so the UI reads cheap-to-expensive. The classifier
+        # tags each target with a ``tier`` field for downstream UI badges.
+        targets = _pick_top_per_tier(targets, single_signing_ceiling,
+                                       max_per_tier=1)
 
         target_names = {t.get("player_name") for t in targets if t.get("player_name")}
         pricing_comparables = _pick_pricing_comparables(

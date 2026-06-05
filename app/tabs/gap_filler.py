@@ -584,16 +584,21 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
             n_tgt = gr.get("n_targets_available", len(targets))
             source = gr.get("targets_source", "stat_fit")
             base = ("retrieved by ChromaDB semantic match against the gap's "
-                    "diagnostic reasoning, filtered to within-budget contracts "
-                    "at this position") if source == "vectorstore" \
-                   else "filtered by position and within-budget contracts"
+                    "diagnostic reasoning, filtered to position-eligible "
+                    "contracts within 5× the single-signing ceiling"
+                    ) if source == "vectorstore" \
+                   else "filtered by position, up to 5× the single-signing ceiling"
+            tier_note = (
+                ", then bucketed into bargain / at-budget / premium tiers "
+                "with the top-1 by composite improvement picked per tier"
+            )
             if incumbent and incumbent.get("primary_player"):
                 source_label = (
-                    f"{base}, then re-ranked by composite improvement over "
-                    f"the current incumbent {incumbent['primary_player']}"
+                    f"{base}{tier_note} (improvement is measured against the "
+                    f"current incumbent {incumbent['primary_player']})"
                 )
             else:
-                source_label = base + " (no incumbent baseline available)"
+                source_label = base + tier_note + " (no incumbent baseline)"
             st.markdown(
                 f"**Recommended targets** &nbsp;<span style='color:#666;font-size:0.85em'>"
                 f"({n_tgt} {'option' if n_tgt == 1 else 'options'}, {source_label})"
@@ -609,6 +614,24 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
                 tgt_cols = st.columns(len(targets))
                 for t, col in zip(targets, tgt_cols):
                     with col:
+                        # Tier badge -- bargain (green) / medium (blue) / premium (orange).
+                        # Sits above the player name so the buyer immediately knows
+                        # whether this card is a cheap stretch or a budget-buster.
+                        tier = t.get("tier")
+                        if tier:
+                            badge = {
+                                "bargain": ("BARGAIN", "#2E863E", "#E8F4EA"),
+                                "medium":  ("AT BUDGET", "#3A82CD", "#E6EFF8"),
+                                "premium": ("PREMIUM",  "#C26B1F", "#FBEFE3"),
+                            }.get(tier, ("?", "#666", "#EEE"))
+                            label, fg, bg = badge
+                            st.markdown(
+                                f"<div style='display:inline-block;padding:2px 8px;"
+                                f"font-size:0.72em;font-weight:700;letter-spacing:0.5px;"
+                                f"background:{bg};color:{fg};border-radius:3px;"
+                                f"margin-bottom:6px'>{label}</div>",
+                                unsafe_allow_html=True,
+                            )
                         name_line = f"**{t['player_name']}**"
                         if t.get("is_expensive_vs_estimate"):
                             pct = int((t.get("premium_vs_estimate") or 0) * 100)

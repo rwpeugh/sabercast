@@ -502,10 +502,10 @@ try:
         _fail("compute_committed_payroll('SEA', 2024) returned wrong shape",
               str({k: v for k, v in sea.items() if k != "breakdown"}))
 
-    # 11b — Gap Filler honors the new ceiling (no target AAV > ceiling).
-    # Use a generous $250M budget so SEA's ~$166M Spotrac committed leaves
-    # meaningful room (otherwise SEA goes over-committed and we get 0 targets
-    # which is a tautology for the ceiling check).
+    # 11b — Gap Filler honors the new ceiling for BARGAIN/MEDIUM tier targets.
+    # Premium-tier targets are allowed (and expected) to exceed the ceiling --
+    # they're surfaced as "stretch picks." Use a generous $250M budget so SEA's
+    # ~$166M Spotrac committed leaves real available room across all tiers.
     test_budget = 250_000_000
     r = run_gap_filler_simple("SEA", test_budget, evaluation_year=2024)
     ceiling = r["single_signing_ceiling"]
@@ -514,15 +514,21 @@ try:
         _fail("ceiling math wrong",
               f"got {ceiling:.1f}, expected {expected_ceiling:.1f}")
     else:
-        violators = [t for g in r["gaps_results"] for t in g["targets"]
-                     if (t.get("aav") or 0) > ceiling]
-        if violators:
-            _fail("Gap Filler returned targets above the single-signing ceiling",
-                  f"({len(violators)} violators)")
+        # Only bargain/medium-tier targets must stay at-or-under the ceiling.
+        # Premium targets are explicitly stretch picks.
+        budget_tier_violators = [
+            t for g in r["gaps_results"] for t in g["targets"]
+            if t.get("tier") in ("bargain", "medium")
+            and (t.get("aav") or 0) > ceiling
+        ]
+        if budget_tier_violators:
+            _fail("bargain/medium targets exceed the single-signing ceiling",
+                  f"({len(budget_tier_violators)} violators)")
         else:
-            _ok("ceiling = 30% of (total - committed); no target AAV exceeds it",
+            _ok("ceiling = 30% of (total - committed); bargain/medium tiers honor it",
                 f"(ceiling=${ceiling/1e6:.1f}M for ${test_budget/1e6:.0f}M budget - "
-                f"${r['committed_payroll']/1e6:.1f}M committed)")
+                f"${r['committed_payroll']/1e6:.1f}M committed; premium tier is "
+                f"intentionally above-ceiling)")
 
     # 11c — User-provided committed override changes the ceiling
     r_override = run_gap_filler_simple("SEA", 165_000_000, evaluation_year=2024,
@@ -539,7 +545,9 @@ try:
         _ok("user override changes the ceiling correctly",
             f"(override=$120M -> ceiling=${r_override['single_signing_ceiling']/1e6:.1f}M)")
 
-    # 11d — Over-committed: budget < committed yields zero targets, no crash
+    # 11d — Over-committed: budget < committed -> ceiling = $0; premium tier
+    # is the only one populated (intentional fallback so the user still sees
+    # actionable recommendations alongside the over_committed flag).
     r_over = run_gap_filler_simple("SEA", 40_000_000, evaluation_year=2024)
     if not r_over.get("over_committed"):
         _fail("over_committed flag not set when budget < committed",
@@ -548,13 +556,18 @@ try:
         _fail("ceiling != 0 in over-committed case",
               f"got ${r_over['single_signing_ceiling']/1e6:.1f}M")
     else:
-        total_targets = sum(len(g["targets"]) for g in r_over["gaps_results"])
-        if total_targets == 0:
-            _ok("over-committed case returns zero targets without crashing",
-                "(budget $40M < committed; over_committed=True; ceiling=$0)")
+        all_targets = [t for g in r_over["gaps_results"] for t in g["targets"]]
+        all_premium = all(t.get("tier") == "premium" for t in all_targets)
+        if all_targets and all_premium:
+            _ok("over-committed case surfaces premium-tier recommendations",
+                f"(over_committed=True; ceiling=$0; "
+                f"{len(all_targets)} targets returned, all tier=premium)")
+        elif not all_targets:
+            _warn("over-committed case returned no targets at all",
+                  "(premium-fallback intent: should surface stretch picks)")
         else:
-            _warn(f"over-committed case still returned {total_targets} targets",
-                  "(may be by design — vectorstore can surface candidates above ceiling)")
+            _fail("over-committed case has non-premium tiers",
+                  f"tiers seen: {set(t.get('tier') for t in all_targets)}")
 
     # 11e — Spotrac source preferred over contracts-sum when available
     if sea.get("committed_source") == "spotrac_team_payroll":
@@ -567,6 +580,92 @@ try:
               f"pipelines/02d_pull_team_payrolls.py to enable)")
 except Exception as e:                                          # noqa: BLE001
     _fail("payroll-math test crashed", f"{type(e).__name__}: {e}")
+    traceback.print_exc()
+
+
+# ── Test 12: Tiered recommendations (bargain / medium / premium) ──────────
+# Per gap, the Gap Filler now returns up to 3 candidates -- top-1 from each
+# AAV tier (bargain <= 50% of ceiling; medium between 50% and 100%; premium
+# above ceiling, capped at max(5*ceiling, $30M)). Verifies:
+#  (a) Each returned target carries a "tier" field in {bargain, medium, premium}
+#  (b) Tier classification matches the AAV / ceiling rule
+#  (c) Ordering within a gap is bargain -> medium -> premium
+#  (d) Over-committed teams still get recommendations (premium-only fallback)
+print("\n=== Test 12: Tiered recommendations (bargain / medium / premium) ===")
+try:
+    from core.orchestrator import (
+        TIER_BARGAIN_RATIO, TIER_ORDER, _classify_target_tier,
+    )
+
+    # 12a + 12b: SEA at $250M leaves real available room across all tiers
+    r = run_gap_filler_simple("SEA", 250_000_000, evaluation_year=2024)
+    ceiling = r["single_signing_ceiling"]
+    misclassified, missing_tier, tier_order_violations = [], [], []
+    gaps_with_at_least_one_bargain = 0
+    gaps_with_at_least_one_premium = 0
+    for g in r["gaps_results"]:
+        tiers_seen = []
+        for t in g["targets"]:
+            tier = t.get("tier")
+            aav  = t.get("aav") or 0
+            if tier not in TIER_ORDER:
+                missing_tier.append((g["gap"]["position"], t["player_name"], tier))
+                continue
+            expected = _classify_target_tier(aav, ceiling)
+            if tier != expected:
+                misclassified.append(
+                    (g["gap"]["position"], t["player_name"],
+                     f"got={tier} expected={expected} aav=${aav/1e6:.1f}M ceiling=${ceiling/1e6:.1f}M")
+                )
+            tiers_seen.append(tier)
+        if any(x == "bargain" for x in tiers_seen): gaps_with_at_least_one_bargain += 1
+        if any(x == "premium" for x in tiers_seen): gaps_with_at_least_one_premium += 1
+        # Order: bargain -> medium -> premium
+        order_pos = {"bargain": 0, "medium": 1, "premium": 2}
+        last = -1
+        for t in g["targets"]:
+            pos = order_pos.get(t.get("tier"), 99)
+            if pos < last:
+                tier_order_violations.append(
+                    (g["gap"]["position"], t["player_name"], t.get("tier"))
+                )
+            last = pos
+    if missing_tier:
+        _fail("some targets missing tier field", f"{missing_tier[:3]}")
+    elif misclassified:
+        _fail("tier classification disagrees with AAV/ceiling rule",
+              f"{misclassified[:3]}")
+    elif tier_order_violations:
+        _fail("targets not ordered bargain->medium->premium within gap",
+              f"{tier_order_violations[:3]}")
+    else:
+        _ok(f"all SEA targets carry correct tier label, ordered bargain->medium->premium",
+            f"(ceiling=${ceiling/1e6:.1f}M, bargain found in "
+            f"{gaps_with_at_least_one_bargain}/3 gaps, premium in "
+            f"{gaps_with_at_least_one_premium}/3 gaps)")
+
+    # 12c: Over-committed team still gets recommendations (premium-only)
+    r_over = run_gap_filler_simple("SEA", 40_000_000, evaluation_year=2024)
+    over_targets = [t for g in r_over["gaps_results"] for t in g["targets"]]
+    if r_over.get("over_committed") and over_targets:
+        tiers = [t.get("tier") for t in over_targets]
+        if all(x == "premium" for x in tiers):
+            _ok("over-committed case still returns premium recommendations",
+                f"({len(over_targets)} targets returned, all tier=premium)")
+        else:
+            _fail("over-committed case has non-premium tiers",
+                  f"tiers seen: {set(tiers)}")
+    elif r_over.get("over_committed") and not over_targets:
+        # The orchestrator may have decided to return zero targets; that's also
+        # acceptable behavior. But our premium-fallback intent is to surface
+        # something, so warn rather than fail.
+        _warn("over-committed case returned no targets at all",
+              "(premium-fallback intent: should surface 3 premium options)")
+    else:
+        _fail("over-committed flag not set",
+              f"got over_committed={r_over.get('over_committed')}")
+except Exception as e:                                          # noqa: BLE001
+    _fail("tier-recommendation test crashed", f"{type(e).__name__}: {e}")
     traceback.print_exc()
 
 
