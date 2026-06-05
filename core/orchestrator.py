@@ -699,13 +699,39 @@ def _lookup_candidate_catcher_pop(name: str,
 def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
                               evaluation_year: int) -> dict:
     """Estimate the team's committed payroll for the upcoming season
-    (``market_year = evaluation_year + 1``).
+    (``market_year = evaluation_year + 1``), as seen by a no-look-ahead GM
+    BEFORE the ``market_year`` offseason starts.
+
+    The semantic intent is: "what's already on the books for this team going
+    INTO the offseason of ``market_year - 1``?" That's the payroll baseline
+    a hypothetical GM at the end of ``evaluation_year`` would actually know.
+    It is NOT the post-offseason number -- the new signings the GM is about
+    to consider are precisely what the Gap Filler is recommending.
+
+    No-look-ahead trap (Entry 35). The original implementation looked up
+    ``team_payrolls_<market_year>.csv``, which for the demo's
+    ``evaluation_year=2024`` resolves to the 2025 Spotrac team payroll page.
+    Spotrac's 2025 page is the POST-offseason snapshot -- it includes Fried
+    (NYY), Snell + Sasaki (LAD), Burnes (ARI), etc., all signed during the
+    2024-25 offseason. Surfacing those as "already committed" to a 2024 GM
+    would leak future signings into the available-payroll calculation. The
+    bias was material: LAD overstated by $83M, SD by $48M, PHI by $50M when
+    measured against the 2024 vintage.
+
+    Fix: look up ``team_payrolls_<evaluation_year>.csv`` -- the END-OF-SEASON
+    payroll for the year the GM is operating in, which represents commitments
+    BEFORE any market_year offseason activity. This is a slight conservative
+    over-estimate (it includes 1-year deals that expire after evaluation_year
+    and won't actually carry into market_year), which directionally pushes
+    the Gap Filler toward smaller, cheaper recommendations -- safer than the
+    optimistic alternative.
 
     Source preference (best -> worst):
-      1. ``data/raw/team_payrolls_<market_year>.csv`` -- Spotrac's authoritative
-         per-team total, pulled by ``pipelines/02d_pull_team_payrolls.py``.
-         Includes every player on the active roster + retained payroll. This
-         is the correct number to use whenever it's available.
+      1. ``data/raw/team_payrolls_<evaluation_year>.csv`` -- Spotrac's
+         per-team total from the ``evaluation_year`` season page, pulled by
+         ``pipelines/02d_pull_team_payrolls.py <evaluation_year>``. Includes
+         every player on that season's active roster + retained payroll. This
+         is the no-look-ahead committed baseline.
       2. Sum of contracts.csv rows for the team where the contract was signed
          on or before ``evaluation_year`` AND is still active in ``market_year``.
          Used as a fallback when the team_payrolls CSV is missing. Skews to
@@ -722,15 +748,18 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
       * ``coverage_caveat``    -- one-line note appropriate to the source
 
     No-look-ahead. The contracts-sum path filters ``signed_year <= evaluation_year``
-    so historical backtests don't leak future signings into the committed payroll.
-    The team_payrolls path is by definition current-year; for historical
-    evaluation_years (running a 2022 backtest in 2026), prefer the contracts-sum
-    path or pull a vintage team_payrolls_<year>.csv via the pipeline.
+    so historical backtests don't leak future signings. The team_payrolls path
+    now uses the ``evaluation_year`` vintage by design; historical backtests for
+    e.g. evaluation_year=2022 require pulling ``team_payrolls_2022.csv`` via the
+    pipeline (otherwise the fallback contracts-sum path is used).
     """
     market_year = evaluation_year + 1
 
     # ── Source 1: Spotrac team-payroll total (preferred) ─────────────────
-    team_payrolls_path = DATA_RAW / f"team_payrolls_{market_year}.csv"
+    # Use the evaluation_year vintage (NOT market_year) to avoid leaking
+    # market_year offseason signings into the GM's "already committed"
+    # baseline. See docstring for the no-look-ahead reasoning.
+    team_payrolls_path = DATA_RAW / f"team_payrolls_{evaluation_year}.csv"
     if team_payrolls_path.exists():
         try:
             tp_df = pd.read_csv(team_payrolls_path, encoding="utf-8")
@@ -746,10 +775,13 @@ def compute_committed_payroll(team_abbr: str, contracts: pd.DataFrame,
                         "breakdown":         [],
                         "market_year":       market_year,
                         "coverage_caveat":   (
-                            f"Sourced from Spotrac's {team_abbr} team payroll page "
-                            f"({snap_date}). Includes the full active roster plus "
-                            f"retained payroll. This is the authoritative committed "
-                            f"figure -- no estimation required."
+                            f"Sourced from Spotrac's {team_abbr} {evaluation_year} "
+                            f"team payroll page ({snap_date}). End-of-season "
+                            f"{evaluation_year} active roster + retained payroll -- "
+                            f"the no-look-ahead committed baseline a GM would see "
+                            f"going into the {evaluation_year}-{market_year} offseason. "
+                            f"Slight conservative over-estimate (1-year deals expiring "
+                            f"after {evaluation_year} are included)."
                         ),
                     }
         except Exception:                                       # noqa: BLE001

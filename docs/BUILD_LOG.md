@@ -1788,3 +1788,78 @@ Elapsed time: 8.54s for the Opponent Scouting call; ~10s for Roster Builder. Wit
 **Time: ~3 hours (1h pipelines + scope discovery, 1h helper plumbing + prompt rewrites, 1h smoke tests + debug + writeup).**
 
 ---
+
+## Entry 35 — June 5: No-look-ahead fix in Gap Filler's committed-payroll lookup
+
+**User catch.** *"Does the Gap Filler's 2025 committed payroll include players the teams signed during the offseason? If so, the hypothetical 2024 GM would not have made those moves yet — it should use 2024 committed payroll."*
+
+**Yes, it did.** This is a no-look-ahead leak that survived the original committed-payroll work in Entries 27-28. The Spotrac team-payroll page for 2025 was scraped on 2026-06-04, well after the 2024-25 offseason — so the "2025 committed payroll" numbers in `data/raw/team_payrolls_2025.csv` are POST-offseason, baking in every FA signing the Gap Filler is meant to be recommending. Surfacing those commitments as "already on the books" to a hypothetical 2024 GM was a category error.
+
+### The bias was material
+
+Pulled `team_payrolls_2024.csv` via the existing pipeline (`python pipelines/02d_pull_team_payrolls.py 2024`) and compared:
+
+| Team | OLD (2025 vintage, post-offseason) | NEW (2024 vintage, pre-offseason) | Δ vs OLD |
+|------|-----------------------------------:|---------------------------------:|----------:|
+| LAD  | $350.0M | $266.7M | **−$83.3M** |
+| NYM  | $342.3M | $323.2M | −$19.1M |
+| NYY  | $309.1M | $321.6M | **+$12.5M** |
+| PHI  | $295.3M | $245.3M | −$50.0M |
+| TOR  | $255.2M | $219.7M | −$35.5M |
+| HOU  | $232.4M | $249.7M | +$17.3M |
+| SD   | $223.2M | $174.9M | −$48.3M |
+| ATL  | $220.6M | $238.1M | +$17.5M |
+| CHC  | $214.8M | $231.8M | +$17.0M |
+| SEA  | $166.3M | $150.1M | −$16.2M |
+| DET  | $158.5M |  $98.6M | **−$59.9M** |
+
+Two interesting patterns. Most teams' 2025 vintage is HIGHER than 2024 — that's the expected direction (offseason additions). But some teams (NYY, HOU, ATL, CHC) had HIGHER 2024 payroll than 2025: those are teams whose departing-FA value (Soto, Bregman, Ozuna, Bellinger) exceeded what they replaced in the same offseason. In every case the old number was the **post-offseason** answer; the new number is what the GM going INTO that offseason actually had on the books.
+
+The LAD case is the cleanest illustration: the OLD code was hiding $83M of headroom that LAD had at the end of 2024. With the fix, a 2024-GM-simulation on LAD with a $310M budget sees $43M of available room rather than $0 (over-committed); the Gap Filler can now recommend the kind of mid-tier signings (Snell-tier, Sasaki-tier) LAD actually made.
+
+### The fix
+
+One-line conceptual change in `compute_committed_payroll`:
+
+```python
+# Before
+team_payrolls_path = DATA_RAW / f"team_payrolls_{market_year}.csv"
+# After
+team_payrolls_path = DATA_RAW / f"team_payrolls_{evaluation_year}.csv"
+```
+
+Semantic rationale (now documented in the function's docstring):
+
+> "What's already on the books for this team going INTO the offseason of market_year - 1?" The end-of-evaluation_year payroll is the no-look-ahead committed baseline a GM would actually know — NOT the post-offseason number, because the post-offseason signings are precisely what the Gap Filler is recommending.
+
+The fix is a slight conservative over-estimate — 2024 payroll includes 1-year deals that expire after 2024 and won't actually carry into 2025. We don't have a clean per-contract expiry breakdown for league-minimum / pre-arb players (those are the rows missing from contracts.csv that motivated the team-payroll scrape in the first place), so the precise "2024 payroll minus expiring deals" arithmetic isn't available. Over-estimating committed payroll pushes the Gap Filler toward smaller, cheaper recommendations — which is the right direction for a conservative no-look-ahead bias.
+
+### What this fixes downstream
+
+`single_signing_ceiling = available_for_signings * 0.30` flows through into the LLM payload as a budget guardrail, and `tier` classification (`bargain / at_budget / premium`) depends on `forecast_aav / single_signing_ceiling`. With the fix:
+
+- LAD@$310M total → single-signing ceiling = $13.0M (was $0 — over-committed)
+- SEA@$220M total → ceiling = $21.0M (was $16.1M)
+- NYY@$350M total → ceiling = $8.5M (was $12.3M)
+
+In other words, the tier mix the user sees in the UI is now grounded in the no-look-ahead budget. NYY shifts toward tighter recommendations (the team really IS more constrained in 2024 than the 2025 page suggests, because the 2025 page assumes Soto was already gone). LAD shifts toward more attainable recommendations. That's the correct direction in both cases.
+
+### What stays the same
+
+- The contracts-sum fallback path (`compute_committed_payroll` Source 2) was already filtered with `signed_year <= evaluation_year` — that path was already no-look-ahead clean.
+- The UI override (user editable Committed Payroll field) is unchanged; a real GM can still type in their team's actual number.
+- Historical backtests (evaluation_year=2021/2022) now require a vintage `team_payrolls_<year>.csv` for the preferred path; without it, they fall through to contracts-sum (which is fine — already no-look-ahead).
+
+### Updated artifacts
+
+- `core/orchestrator.py` — `compute_committed_payroll` switched lookup year + docstring expanded with the no-look-ahead rationale and coverage_caveat reworded
+- `data/raw/team_payrolls_2024.csv` — NEW, 30 teams pulled from Spotrac's 2024 season payroll pages
+
+### What didn't need to change
+
+- `pipelines/02d_pull_team_payrolls.py` already supported arbitrary years (`python pipelines/02d_pull_team_payrolls.py 2024`); just had to run it
+- `app/tabs/gap_filler.py` UI doesn't need changes — it reads from the orchestrator's `committed_payroll` and `committed_caveat`, both of which now carry the corrected values + clearer caveat text
+
+**Time: ~40 minutes (5 confirming the bias, 5 pulling the 2024 vintage, 10 rewriting the helper + docstring, 10 smoke-testing across multiple teams, 10 writeup).**
+
+---
