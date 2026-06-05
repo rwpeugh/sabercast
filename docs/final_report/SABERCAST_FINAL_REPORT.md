@@ -56,14 +56,18 @@ The full architecture is in `docs/architecture_diagram.md` (Mermaid source) and 
 | **Runtime reasoning** | `gpt-4o` (gap diagnostic, opponent scouting), `gpt-4o-mini` (contract estimate, target forecast, roster builder), `text-embedding-3-small` (RAG retrieval via `player_matcher.py`), fine-tuned `Qwen 2.5 7B` (held-out MAE eval only, via Together dedicated endpoint) |
 | **User-facing** | Three Streamlit tabs deployed at sabercast-mlb.streamlit.app |
 
-**RAG flow specifically:**
+**RAG flow specifically (updated post Entries 25-29):**
 
-1. User selects team + identifies a gap
-2. `diagnose_gaps_llm` (gpt-4o) returns ranked gap positions with reasoning
+1. User selects team, enters total payroll budget, and (optionally overrides) committed payroll
+   - **Committed payroll** is auto-sourced from `data/raw/team_payrolls_<year>.csv` (Spotrac per-team page, authoritative — see Entry 28) with a `contracts.csv`-sum fallback. `available = max(0, total − committed)`; `single_signing_ceiling = 30% × available`
+2. `diagnose_gaps_llm` (gpt-4o) returns ranked gap positions with reasoning + an `offense / defense / pitching` weight split per gap
 3. For each gap, the reasoning text is embedded via `text-embedding-3-small` and used as a similarity query against ChromaDB's `sabercast_player_profiles` collection
-4. ChromaDB returns top-k candidates filtered by position + budget + `signed_year ≤ evaluation_year`
-5. Candidates pass to `forecast_target_contract_llm` (gpt-4o-mini in production; or the fine-tuned Qwen-7B for the offline MAE eval)
-6. Gap Filler tab renders the gap, top-3 candidates, and per-target contract forecast
+4. ChromaDB returns top-20 candidates filtered by position + `signed_year ≤ evaluation_year` + AAV up to `max(5 × single_signing_ceiling, $30M)` (premium-tier upper bound)
+5. **Incumbent-aware composite re-ranking (Entry 25).** `get_position_incumbent` identifies the team's current player at the gap position (OAA for fielders, GS for SP, G for RP, catcher_defense for C). Each candidate gets a `composite_improvement_score = off_weight × normalized_offense_delta + def_weight × normalized_defense_delta` where deltas are computed against the incumbent and weights come from the gap's `gap_components`
+6. **Tier bucketing (Entry 29).** Candidates are classified into **bargain** (`AAV ≤ 50% × ceiling`), **at-budget** (`50% × ceiling < AAV ≤ ceiling`), or **premium** (`ceiling < AAV ≤ max(5 × ceiling, $30M)`). Top-1 per tier by composite score, returned in bargain→at-budget→premium order
+7. Each selected candidate passes to `forecast_target_contract_llm` (gpt-4o-mini in production; or the fine-tuned Qwen-7B for the offline MAE eval) with the **incumbent profile and improvement deltas** in the user payload so the rationale explicitly articulates the trade-off
+8. **Three-layered hallucination defense (Entry 26).** Before display: (a) incumbent dimensions without corresponding deltas are stripped from the payload, (b) the LLM rationale is regex-validated against the deltas dict, (c) if a hallucinated phrase is detected, the rationale is replaced with a deterministic template built from the same deltas
+9. Gap Filler tab renders the Payroll Situation panel, the Current Incumbent callout per gap, and three tier-badged target cards with vs-incumbent delta chips and trade-off rationales
 
 **Determinism guarantees on every reasoning call:** `temperature=0`, `seed=42`, `response_format={"type": "json_object"}`. The system is reproducible to within ~1 prediction per held-out evaluation.
 
@@ -77,11 +81,17 @@ The full architecture is in `docs/architecture_diagram.md` (Mermaid source) and 
 
 Sabercast exercises five distinct LLM-application techniques covered in the course, each with a corresponding eval artifact.
 
-### 4.1 Retrieval-augmented generation (RAG)
+### 4.1 Retrieval-augmented generation (RAG) + incumbent-aware re-ranking
 
-ChromaDB persistent vectorstore with 999 player profiles + 15 glossary entries. Each profile has an embedding of a natural-language player description plus structured metadata (archetype, trend, position role, year). Player matcher embeds a gap-description query, retrieves top-k by cosine similarity, filters by position + budget + signed_year, then re-ranks with gpt-4o-mini.
+**Retrieval layer.** ChromaDB persistent vectorstore with 999 player profiles + 15 glossary entries. Each profile carries an embedding of a natural-language player description plus structured metadata (archetype, trend, position role, year). `player_matcher.find_matches` embeds a gap-description query via `text-embedding-3-small`, retrieves top-20 by cosine similarity, then filters by position + `signed_year ≤ evaluation_year` + AAV cap. Validated independently: precision@10 against actual 2025 free-agent signings is **3.1× the random baseline at p < 0.0001** (see §5.6 / Entry 31).
 
-**Validated:** RAG produces a +70 pp accuracy gain (McNemar p = 0.0005) — see §5.3.
+**Display layer (Entries 25, 28, 29).** The 20 retrieved candidates pass through three downstream stages before display:
+
+1. *Incumbent-aware composite re-ranking.* `_compute_improvement_deltas` measures each candidate's offensive, defensive, and pitching deltas against the team's current incumbent at the gap position. A `composite_score` combines them weighted by the gap's `offense / defense` ratio.
+2. *Three-tier bucketing.* Candidates are classified into **bargain** (≤ 50% of single-signing ceiling), **at-budget** (50–100% of ceiling), or **premium** (above ceiling, capped at `max(5 × ceiling, $30M)`). Top-1 per tier by composite, returned cheap-to-expensive.
+3. *Trade-off articulation.* `forecast_target_contract_llm` receives the incumbent profile + deltas; the gpt-4o-mini prompt requires the rationale to explicitly cite the trade-off ("Adds 0.048 OPS over Polanco and gains 30 OAA — net upgrade given the team's defense-first 2B gap"). Output is regex-validated against the deltas and falls back to a deterministic programmatic rationale if any number is hallucinated (Entry 26's three-layered defense — eliminates hallucinations across 54 rationale stress test).
+
+The retrieval claim (§5.6) measures the bottom layer; the display stages do not change *whether* the actual signing is in the top-20, only *how it's presented*.
 
 ### 4.2 Multi-model routing
 

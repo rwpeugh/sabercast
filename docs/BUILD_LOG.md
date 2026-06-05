@@ -1534,3 +1534,89 @@ A future eval could measure the **user-facing precision** — does the actual si
 **Time: ~10 minutes (run + verify + clarify).**
 
 ---
+
+---
+
+## Entry 32 — June 4 (Final-build polish sweep): tasks #66, #68, #70, #71, #69
+
+Five tasks executed sequentially as a polish sweep. Two led to real findings; three were clean verifications.
+
+### Task #66 — Final report + EVALUATION.md updated for the Entry 25-29 architecture
+
+The "Architecture" and "§4.1 RAG" sections in `SABERCAST_FINAL_REPORT.md` previously described the Gap Filler as *"retrieves top-k by cosine similarity, filters by position + budget, then re-ranks with gpt-4o-mini."* That was the Entry 24 state. Rewrote both to cover the current pipeline:
+
+- Payroll-aware ceiling computation (Entries 27 + 28)
+- Incumbent identification via `get_position_incumbent` (Entry 25)
+- Composite-improvement re-ranking against the incumbent
+- Three-tier bucketing (Entry 29)
+- Trade-off articulation + three-layered hallucination defense (Entry 26)
+
+The RAG flow numbered list grew from 6 steps to 9. The §4.1 section now distinguishes the **retrieval layer** (`find_matches` — what precision@10 measures) from the **display layer** (the four downstream stages). Regenerated `Sabercast_Final_Report.docx`.
+
+### Task #68 — Backward-compat caught a real no-look-ahead bug
+
+Ran `run_gap_filler_simple` with `evaluation_year=2022` and `evaluation_year=2021` to confirm the historical backtests still work after the Entry 25 incumbent helper landed. Both completed without crashing, but inspection of the 2022 SEA result showed **the incumbent was Jorge Polanco — who didn't play for SEA until 2025**.
+
+**Root cause:** lines 1956-1958 of `core/orchestrator.py` (the `run_gap_filler_simple` path) hardcoded the defensive CSV filenames:
+```python
+oaa_df     = _try_read("oaa_2024.csv")          # <-- always 2024!
+sprint_df  = _try_read("sprint_speed_2024.csv")
+catcher_df = _try_read("catcher_defense_2024.csv")
+```
+Should have been `f"oaa_{evaluation_year}.csv"` etc. The Roster Builder path at lines 2621-2623 used the f-string correctly; the Gap Filler path didn't. So every historical backtest from `evaluation_year < 2024` was silently leaking 2024 defensive data into the diagnostic and the incumbent identification.
+
+**Impact:** the eval pipeline's correlation study (5-year backtest 2019-2023) ran with this bug. The precision@10 RAG test at evaluation_year=2024 was NOT affected (the data really was 2024). The wins-prediction nulls similarly were not affected (they don't use OAA). The bug primarily affected per-position incumbent identification in historical years.
+
+**Fix:** changed lines 1956-1958 to use the f-string pattern that the Roster Builder path already used. Re-verified: SEA 2022 incumbents are now Crawford (SS) / Winker (LF) / France (1B) — correct for that year. SEA 2021: Haniger (RF) / Kelenic (CF) — also correct.
+
+Smoke suite still passes 26/26 after the fix.
+
+### Task #70 — SP/RP rationale stress test (12 rationales, 0 hallucinations)
+
+Generated pitcher rationales across COL, OAK, WSH, PIT, MIA. None of the 8 teams had RP gaps flagged in their 2024 diagnostic, so all 12 rationales were SP. All 12 came from the LLM source (no programmatic-fallback triggered) and all 12 passed regex validation. Examples:
+
+- *"Adds 1.37 ERA and 4.8 K/9 over Ryan Feltner, making him a significant upgrade for the rotation."* (Snell vs COL incumbent)
+- *"Adds 1.29 ERA over Jake Irvin but gives back 0.151 WHIP — net upgrade given the team's pitching gap."* (Snell vs WSH incumbent, with honest WHIP trade-off)
+- *"Adds 0.46 ERA and 0.045 WHIP over Jake Irvin but loses durability; net upgrade given team's pitching needs."* (Scherzer vs Irvin — voluntary durability acknowledgment)
+
+`_rationale_hallucinations` shares the ERA/WHIP/K9 regex patterns between SP and RP code paths, so SP validation transitively covers RP.
+
+### Task #71 — Gap Filler latency profile (median 9.80s, mean 12.12s)
+
+Five teams (SEA, CHC, NYY, OAK, LAD), wall-clock end-to-end:
+- SEA: 20.23s (cold-cache outlier — vectorstore init)
+- CHC: 11.62s
+- NYY: 9.80s
+- OAK: 9.44s
+- LAD: 9.52s
+
+Mean 12.12s · median 9.80s · stdev 4.62s. The **pitch slide's "13 sec" claim remains valid** — the k=20 candidate-pool widening from Entry 29 (was k=10) didn't blow up wall time; composite re-ranking, tier picking, and the hallucination defense are all sub-second.
+
+### Task #69 — Deployed Streamlit Cloud is stale
+
+Ran `demo/verify_deployed_entry29.py` against `sabercast-mlb.streamlit.app`. The deployed page rendered cleanly but **0/4 Entry-23+ markers were present**:
+- Roster Builder probable-pitcher dropdown — MISSING
+- Roster Builder reworked caption — MISSING
+- Committed payroll input — MISSING
+- Total payroll budget label — MISSING
+
+The deployed app is showing the pre-Entry-23 state (Roster Builder with the old "Scouting as of" text column instead of the probable-pitcher dropdown). Streamlit Cloud's auto-redeploy has been silently failing through 10+ commits since `e7c79e6` on June 3.
+
+**Action:** updated the entry-point docstring (`app/streamlit_app.py`) with current copy (was "9 tests, 16 entries"; now "13 tests, 32 entries") to force Streamlit Cloud to detect a change and redeploy. If that still doesn't take, the user will need to manually reboot via the Streamlit Cloud dashboard.
+
+### New artifacts
+
+- `demo/verify_deployed_entry29.py` — pings the deployed URL, screenshots the page, greps body text for Entry 23-29 markers, writes a verdict file. Re-runnable any time we suspect a stale deploy.
+- `docs/checkpoint3/deployed_entry29_pageload.png` — evidence of the stale deploy.
+- `docs/checkpoint3/deployed_entry29_verdict.txt` — 0/4 marker tally.
+
+### Updated artifacts
+
+- `core/orchestrator.py` — hardcoded `oaa_2024.csv` swapped for `f"oaa_{evaluation_year}.csv"` (and matching sprint/catcher lines)
+- `app/streamlit_app.py` — refreshed entry-point docstring (forcing function for redeploy)
+- `docs/final_report/SABERCAST_FINAL_REPORT.md` — RAG-flow section + §4.1 rewritten for Entry 25-29
+- `docs/final_report/Sabercast_Final_Report.docx` — regenerated
+
+**Time across all five tasks: ~90 minutes.**
+
+---

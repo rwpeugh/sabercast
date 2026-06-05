@@ -1953,9 +1953,12 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         p = DATA_RAW / name
         return pd.read_csv(p, encoding="utf-8") if p.exists() else None
 
-    oaa_df     = _try_read("oaa_2024.csv")
-    sprint_df  = _try_read("sprint_speed_2024.csv")
-    catcher_df = _try_read("catcher_defense_2024.csv")
+    # NB: must use evaluation_year, NOT a hardcoded 2024, so historical
+    # backtests don't leak future defensive data into the diagnostic +
+    # incumbent helpers. The Roster Builder path uses the same pattern.
+    oaa_df     = _try_read(f"oaa_{evaluation_year}.csv")
+    sprint_df  = _try_read(f"sprint_speed_{evaluation_year}.csv")
+    catcher_df = _try_read(f"catcher_defense_{evaluation_year}.csv")
     have_defense = oaa_df is not None and sprint_df is not None
 
     # 2. Aggregate team and league — pass team_league so shared-city pairs

@@ -3,15 +3,19 @@
 Three-tab MLB front-office intelligence app. All three tabs are functional
 across any of the 30 MLB clubs:
     1. Roster Builder    — day-to-day lineup construction vs. a chosen opponent
-                            (one gpt-4o call returning structured lineup + matchup notes)
+                            with optional probable-starter pick for platoon-
+                            aware lineup ordering (one gpt-4o call)
     2. Opponent Scouting — narrative + top threats + exploitable weaknesses
                             (one gpt-4o call)
-    3. Gap Filler        — top-3 roster gaps + candidate targets + contract forecasts
-                            (1 gpt-4o + ~11 gpt-4o-mini calls running in parallel)
+    3. Gap Filler        — top-3 roster gaps, incumbent-aware composite
+                            improvement scoring, bargain / at-budget / premium
+                            tier recommendations with explicit trade-off
+                            rationales (1 gpt-4o + ~11 gpt-4o-mini calls
+                            running in parallel, ~10s end-to-end)
 
 See docs/final_report/SABERCAST_FINAL_REPORT.md for the full evaluation
-(9 tests, 2 statistically significant findings) and BUILD_LOG.md for the
-chronological build history (16 entries).
+(13 pre-registered tests, 4 significant findings) and BUILD_LOG.md for the
+chronological build history (32 entries).
 """
 from __future__ import annotations
 

@@ -1,0 +1,8 @@
+Deployed-app verification (verify_deployed_entry29.py)
+URL: https://sabercast-mlb.streamlit.app/
+Result: 0/4 markers present
+
+  [MISSING] Entry 23 Roster Builder probable-pitcher field: 'Opponent probable starter'
+  [MISSING] Entry 27 committed-payroll input: 'Committed payroll for 2025'
+  [MISSING] Entry 27 budget input: 'Total payroll budget for 2025'
+  [MISSING] Entry 23 caption rewrite: 'scouting as of end of 2024'
