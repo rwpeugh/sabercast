@@ -1485,3 +1485,52 @@ Plain text, correct dollar signs, source-aware "from Spotrac team payroll" messa
 **Time: ~25 minutes (15 building + driving the script; 10 catching and fixing the LaTeX bug).**
 
 ---
+
+---
+
+## Entry 31 — June 4 (Final build): Verify precision@K still holds after Entries 25-29
+
+**Task #64: re-run `eval/precision_at_k.py` to confirm the headline "3.1× lift, p < 0.0001" claim from the pitch slide and final report still holds after the incumbent-aware composite scoring (Entry 25) and tier-bucketed top-3 (Entry 29) changes.**
+
+### Result: bit-for-bit identical to the previously published numbers
+
+| K | observed hits | observed precision | random baseline | lift | z | p (one-sided) |
+|---|---|---|---|---|---|---|
+| 3 | 4 / 43 | 9.3% | 4.0% | 2.32× | 1.79 | 0.0371 |
+| 5 | 7 / 43 | 16.3% | 6.7% | 2.44× | 2.56 | 0.0053 |
+| **10** | **18 / 43** | **41.9%** | **13.3%** | **3.14×** | **5.66** | **≈ 0.0000** |
+
+All three K-values significant at p < 0.05. The headline precision@10 = **41.9% vs 13.3% random, 3.14× lift, p < 0.0001** is the same value to four decimal places as before Entries 25-29 landed.
+
+### Why the number didn't shift (the methodology was already on the right layer)
+
+The eval calls `find_matches(gap, contracts, ..., k=10)` directly — that's the **retrieval layer**. It asks: "Is the actual 2025 signing in the top-10 candidates returned by ChromaDB semantic similarity against the gap's diagnostic reasoning?"
+
+The Entry 25-29 work was downstream of this:
+- **Entry 25**: composite improvement re-ranking of the candidates already returned by `find_matches`
+- **Entry 29**: tier-bucketing those candidates into bargain / at-budget / premium and picking top-1 per tier
+
+Neither stage changes *whether* the actual signing is in the 10. They change *how the 10 are presented to the user* — re-order and subset. Since precision@10 measures membership in the 10, not position within, the metric is invariant to the orchestrator's display logic.
+
+This is methodologically correct: the published claim is about retrieval quality, not user-facing ranking. The new architecture preserves the retrieval claim cleanly.
+
+### Documentation update
+
+Added a "Note on what this measures" subnote under the precision@K headline in **`docs/final_report/EVALUATION.md`**, calling out the separation between retrieval (what we measure) and display (Entry 25 composite re-rank, Entry 29 tier picking). A careful reader can now see that the headline number is invariant to the architectural layer it was *not* designed to measure, AND can see what *would* need a separate eval to measure (the full deployed-orchestrator path).
+
+### Follow-up queued as task #75
+
+A future eval could measure the **user-facing precision** — does the actual signing appear in the top-3 tier-bucketed output of `run_gap_filler_simple`, not just in the top-10 raw-retrieval list? That's a meaningfully different question (composite + tier filtering will sometimes drop the actual signing in favor of a higher-composite candidate). Queued as task #75 because:
+1. It's a new claim, not a re-verification of an existing one
+2. The current evaluation has been verified intact — no urgency
+3. If we add it, we'd want to present it alongside the existing precision@10, not replace it (the retrieval-layer claim is the right benchmark for the retrieval-layer system)
+
+### Files touched
+
+- `eval/results/precision_at_k.csv` — regenerated (bit-for-bit identical content)
+- `eval/results/precision_at_k_summary.csv` — regenerated (identical)
+- `docs/final_report/EVALUATION.md` — methodology subnote added
+
+**Time: ~10 minutes (run + verify + clarify).**
+
+---
