@@ -42,22 +42,15 @@ def _get_cache() -> dict:
     return st.session_state["roster_builder_cache"]
 
 
-def _leverage_chip(leverage: str) -> str:
-    color = {"high": "red", "medium": "orange", "low": "blue"}.get(
-        str(leverage).lower(), "gray"
-    )
-    return f":{color}[**{str(leverage).upper()}**]"
-
-
 def render() -> None:
     st.subheader("Roster Builder")
     st.caption(
         "Day-to-day lineup construction (scouting as of end of 2024 season). "
-        "Pick the team you're managing, the opponent for an upcoming game, "
-        "and — when available — the opponent's confirmed probable starter. "
-        "When a probable starter is selected, the lineup ordering and matchup "
-        "plan are tailored specifically to that pitcher's stat profile. "
-        "No payroll input — this tab uses the existing roster as is."
+        "Pick the team you're managing, the opponent, and (when available) the "
+        "opponent's confirmed probable starter. The lineup ordering is tailored "
+        "to that pitcher's profile. For general scouting of the opponent (top "
+        "threats, exploitable weaknesses, pitching strategy), use the "
+        "**Opponent Scouting** tab."
     )
 
     evaluation_year = 2024
@@ -207,24 +200,14 @@ def render() -> None:
     else:
         st.warning("No lineup returned. Re-run, or check the orchestrator output.")
 
-    # ── Advantages + risks side-by-side ─────────────────────────────────────
-    st.markdown("### Matchup analysis")
-    adv_col, risk_col = st.columns(2)
-    with adv_col:
-        st.markdown("**Advantages to lean into**")
-        for a in (result.get("matchup_advantages") or []):
-            with st.container(border=True):
-                st.markdown(
-                    f"**{a.get('area', '?')}** &nbsp;{_leverage_chip(a.get('leverage','?'))}",
-                    unsafe_allow_html=True,
-                )
-                st.caption(f"Evidence: {a.get('evidence', '')}")
-    with risk_col:
-        st.markdown("**Risks to mitigate**")
-        for r in (result.get("matchup_risks") or []):
-            with st.container(border=True):
-                st.markdown(f"**{r.get('area', '?')}**")
-                st.caption(f"Mitigation: {r.get('mitigation', '')}")
+    # ── Entry 38: removed "Matchup analysis" section (matchup_advantages +
+    # matchup_risks). That content duplicated the Opponent Scouting tab's
+    # pitching_strategy / hitting_approach / exploitable_weaknesses surface.
+    # Roster Builder now produces just the lineup; users open Opponent
+    # Scouting separately for "how to attack this team" content.
+
+    st.caption("For general opponent attack strategy, threat assessment, and "
+               "exploitable weaknesses, see the **Opponent Scouting** tab.")
 
     # ── Reference data tables ───────────────────────────────────────────────
     with st.expander("Reference data fed to the LLM"):

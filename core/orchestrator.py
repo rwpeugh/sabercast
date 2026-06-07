@@ -2877,9 +2877,8 @@ best starting lineup against a specific opponent. You receive:
     opposite-handed hitters (right-handed batters against a left-handed
     pitcher, and vice versa) into the high-leverage spots (1-5). Switch
     hitters are neutral and can slot anywhere. Note the platoon advantage
-    in at least one lineup rationale and one matchup_advantages entry.
-    When ``throws`` is null, do not invent handedness — reason from the
-    stat line alone.
+    in at least one lineup rationale. When ``throws`` is null, do not
+    invent handedness — reason from the stat line alone.
 
     When ``probable_starter`` is null entirely, reason about the staff as a
     whole.
@@ -2909,9 +2908,9 @@ OPTIONAL on each team_hitter entry:
          other way. If the opponent has a -OAA position, prefer hitters
          whose spray tendency sends balls THERE -- they exploit the weak
          defender.
-      3. Mention these reasoning steps in rationales and matchup_advantages
-         when they actually drove a slotting decision. Don't pad rationales
-         with batted-ball language that didn't influence the lineup.
+      3. Mention these reasoning steps in lineup rationales when they
+         actually drove a slotting decision. Don't pad rationales with
+         batted-ball language that didn't influence the lineup.
     When ``batted_ball`` is null, skip those reasoning steps for that
     hitter -- the data isn't available (below Savant's ~250 PA cutoff).
 
@@ -2921,24 +2920,25 @@ Return STRICT JSON only, no prose, with this exact schema:
   "team": "<3-letter abbr>",
   "opponent": "<3-letter abbr>",
   "year": 2024,
-  "narrative": "<2-3 sentence strategic summary of how this team should attack this opponent — name the probable starter if one is provided>",
+  "narrative": "<2-3 sentence summary FOCUSED ON LINEUP CONSTRUCTION — why this lineup is ordered this way against this pitcher. NOT general opponent attack strategy (that lives in the Opponent Scouting tab). Name the probable starter if one is provided.>",
   "recommended_lineup": [
     {"order": <1-9>, "player_name": "<name>", "position": "<C|1B|2B|3B|SS|LF|CF|RF|DH>", "rationale": "<one short phrase, why this slot/order — reference the probable starter's specific weaknesses when applicable>"}
-  ],
-  "matchup_advantages": [
-    {"area": "<short label, e.g. 'attack high WHIP early innings'>", "evidence": "<one short phrase citing stats from the probable starter or the staff>", "leverage": "high" | "medium" | "low"}
-  ],
-  "matchup_risks": [
-    {"area": "<short label>", "mitigation": "<one sentence on how to neutralize it>"}
   ]
 }
 
 The lineup MUST be exactly 9 players covering 9 distinct positions:
 C, 1B, 2B, 3B, SS, LF, CF, RF, DH. Pick the best hitters available who can
 plausibly play each position; if the team's hitter list is thin at a position,
-note this in the rationale rather than inventing a player. Return EXACTLY 3
-matchup_advantages and EXACTLY 2 matchup_risks. Ground every recommendation
-in the data provided; do not reference 2025+ events or trades."""
+note this in the rationale rather than inventing a player. Ground every
+slotting decision in the data provided; do not reference 2025+ events or
+trades.
+
+SCOPE BOUNDARY (Entry 38): this tab produces a LINEUP, not a scouting
+report. The narrative and per-slot rationales should explain WHO bats
+where and WHY in this specific matchup. Do NOT produce general "how to
+attack this team" strategy or "exploitable weaknesses" content -- that
+duplicates the Opponent Scouting tab which the user can open separately
+for the same team."""
 
 
 def build_roster_llm(team_abbr: str, opponent_abbr: str,
@@ -3077,8 +3077,12 @@ def run_roster_builder_simple(team_abbr: str = "SEA",
         "probable_starter":   probable_starter,
         "narrative":          report.get("narrative", ""),
         "recommended_lineup": report.get("recommended_lineup", []),
-        "matchup_advantages": report.get("matchup_advantages", []),
-        "matchup_risks":      report.get("matchup_risks", []),
+        # Entry 38: Roster Builder is narrowed to lineup-only. "Matchup
+        # advantages" and "matchup risks" content duplicated the Opponent
+        # Scouting tab. Empty lists preserved here for any downstream
+        # caller that still reads these keys; the UI no longer renders them.
+        "matchup_advantages": [],
+        "matchup_risks":      [],
     }
 
 

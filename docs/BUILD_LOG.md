@@ -1999,3 +1999,48 @@ The PHI RF case is the cleanest demonstration of the fix actually doing what the
 **Time: ~75 minutes (10 reproducing the bug across multiple teams, 20 designing the pipeline reorder, 25 implementing + testing the helpers, 10 UI chip, 10 verification + writeup).**
 
 ---
+
+## Entry 38 — June 7: Narrow Roster Builder to lineup-only (sharpen tab differentiation)
+
+**User question.** *"Is the Roster Builder output too similar to the Opponent Scouting output?"*
+
+Yes, after Entry 34 added Savant batted-ball + pitch arsenal data to both tabs, the two surfaces drifted toward overlap. Specifically:
+
+- Both produced "how to attack the opponent" narratives.
+- Both surfaced opponent pitcher arsenal info.
+- Both surfaced opponent hitter spray info.
+- Roster Builder's "Matchup advantages" + "Matchup risks" cards duplicated Opponent Scouting's "pitching_strategy" + "hitting_approach" paragraphs.
+
+Two of the three tabs were partially answering each other's question. That blurs the three-question product taxonomy ("what's our lineup?" vs "what should we know about this opponent?" vs "where are our roster gaps?") that the report leans on.
+
+### Decision
+
+Narrow Roster Builder to lineup-only. Drop the "Matchup advantages" and "Matchup risks" sections entirely. Keep the probable-starter callout (lineup construction depends on it) but remove the general "how to attack them" content. Roster Builder now owns one primary deliverable: a nine-slot lineup with per-slot rationales tailored to the matchup. Opponent Scouting owns all "how to beat this team" content.
+
+### Implementation
+
+**`ROSTER_BUILDER_SYSTEM` prompt** updated: removed the `matchup_advantages` and `matchup_risks` schema fields. Added explicit scope boundary instruction telling gpt-4o the narrative should focus on lineup construction logic ("why this lineup is ordered this way against this pitcher") rather than general opponent attack strategy. Removed the "note the platoon advantage in matchup_advantages entry" guidance from the platoon-aware section.
+
+**`run_roster_builder_simple`** still returns `matchup_advantages: []` and `matchup_risks: []` as empty lists so any downstream caller still reading those keys gets a graceful empty rather than a KeyError. The orchestrator never reads them; the UI no longer renders them.
+
+**`app/tabs/roster_builder.py`** UI changes: removed the "Matchup analysis" section (~25 lines of column rendering with leverage chips and mitigation captions). Replaced with a single caption pointing users to the Opponent Scouting tab for that content. Removed the now-unused `_leverage_chip` helper. Updated the tab subtitle caption to make the new scope explicit.
+
+**`docs/final_report/SABERCAST_FINAL_REPORT.md`** Section 3.2 updated to describe Roster Builder as producing "a recommended nine-slot lineup with per-slot rationales tailored to that pitcher's arsenal and handedness" rather than "plus matchup advantages and risks". Added a sentence to that paragraph making the deliberate non-overlap explicit ("Each tab owns a single primary deliverable rather than overlapping into the others").
+
+### Verification
+
+Smoke test on LAD vs DET with Skubal as probable starter. Narrative: *"Against Tarik Skubal, a left-handed pitcher with a strong fastball and changeup, the Dodgers will stack right-handed hitters at the top of the lineup to exploit the platoon advantage..."* That's exactly the scope we want, focused on the lineup-ordering decision, not the broader scouting question. Elapsed time dropped from ~10s to ~5s because the LLM output is now smaller (no matchup_advantages or matchup_risks to generate).
+
+### Updated artifacts
+
+- `core/orchestrator.py` (ROSTER_BUILDER_SYSTEM prompt + return dict)
+- `app/tabs/roster_builder.py` (removed Matchup analysis section + helper)
+- `docs/final_report/SABERCAST_FINAL_REPORT.md` (Section 3.2)
+
+### What's deliberately NOT in this entry
+
+- The reference-data expander still includes opponent pitcher and per-position OAA tables. They live inside an expander labeled "Reference data fed to the LLM" so they're a debugging surface, not a primary output. Keeping them helps anyone who wants to verify the lineup reasoning.
+
+**Time: ~25 minutes (10 prompt + orchestrator edits, 10 UI cleanup + final-report fix, 5 smoke test + writeup).**
+
+---
