@@ -90,13 +90,25 @@ def render() -> None:
     col_h, col_p = st.columns(2)
     with col_h:
         st.markdown("**Top hitters (by 2024 OPS)**")
+        st.caption("Spray columns from Baseball Savant — null when the hitter "
+                   "didn't qualify for the Statcast leaderboard that season.")
+        def _spray_fmt(bb: dict | None, key: str) -> str:
+            if not bb or bb.get(key) is None:
+                return "—"
+            return f"{bb[key]:.1f}%"
         rows = [
             {
                 "Player":  h["name"],
+                "B":       h.get("bats") or "—",
                 "PA":      h["PA"],
                 "HR":      h["HR"],
                 "Slash":   f".{int(h['AVG']*1000):03d}/.{int(h['OBP']*1000):03d}/.{int(h['SLG']*1000):03d}",
                 "OPS":     f"{h['OPS']:.3f}",
+                "GB%":     _spray_fmt(h.get("batted_ball"), "gb_pct"),
+                "FB%":     _spray_fmt(h.get("batted_ball"), "fb_pct"),
+                "Pull%":   _spray_fmt(h.get("batted_ball"), "pull_pct"),
+                "Cntr%":   _spray_fmt(h.get("batted_ball"), "straight_pct"),
+                "Oppo%":   _spray_fmt(h.get("batted_ball"), "oppo_pct"),
             }
             for h in result["top_hitters"]
         ]
@@ -107,6 +119,7 @@ def render() -> None:
         rows = [
             {
                 "Player": p["name"],
+                "T":      p.get("throws") or "—",
                 "Role":   p["role"],
                 "IP":     f"{p['IP']:.1f}",
                 "ERA":    f"{p['ERA']:.2f}",
@@ -116,6 +129,38 @@ def render() -> None:
             for p in result["top_pitchers"]
         ]
         st.dataframe(rows, hide_index=True, use_container_width=True)
+
+        # Per-pitcher arsenal cards: pitch mix with usage % and BA-against per pitch.
+        # Only shown for pitchers whose arsenal lookup succeeded (i.e., they threw
+        # ≥100 of at least one pitch type in the Statcast pool). Mid-leverage
+        # relievers and Sept call-ups may show "Arsenal data unavailable."
+        st.markdown("**Pitch arsenal — usage % and BA-against per pitch**")
+        for p in result["top_pitchers"]:
+            ars = p.get("arsenal") or []
+            with st.expander(
+                f"{p['name']} ({p.get('throws','?')}HP, {p['role']}) — "
+                f"{len(ars)} tracked pitch type{'s' if len(ars) != 1 else ''}",
+                expanded=False,
+            ):
+                if not ars:
+                    st.caption(
+                        "Arsenal data unavailable — pitcher didn't meet the "
+                        "Statcast 100-pitch-per-type threshold in 2024."
+                    )
+                    continue
+                arsenal_rows = [
+                    {
+                        "Pitch":     a.get("pitch_name", a.get("pitch_type", "?")),
+                        "Usage %":   f"{a.get('usage_pct', 0):.1f}%",
+                        "PA":        int(a.get("pa_against", 0) or 0),
+                        "BA":        f"{a.get('ba', 0):.3f}",
+                        "SLG":       f"{a.get('slg', 0):.3f}",
+                        "Whiff %":   f"{a.get('whiff_pct', 0):.1f}%",
+                        "Hard-hit %":f"{a.get('hard_hit_pct', 0):.1f}%",
+                    }
+                    for a in ars
+                ]
+                st.dataframe(arsenal_rows, hide_index=True, use_container_width=True)
 
     st.markdown("---")
 

@@ -1863,3 +1863,55 @@ In other words, the tier mix the user sees in the UI is now grounded in the no-l
 **Time: ~40 minutes (5 confirming the bias, 5 pulling the 2024 vintage, 10 rewriting the helper + docstring, 10 smoke-testing across multiple teams, 10 writeup).**
 
 ---
+
+## Entry 36 — June 5: Surface Tier 1 Savant fields in the Opponent Scouting UI
+
+**Motivation.** Entry 34 plumbed hitter batted-ball spray and pitcher pitch arsenal through the orchestrator and into gpt-4o, but the Opponent Scouting **tab** only showed the legacy stat columns (PA / HR / Slash / OPS for hitters; IP / ERA / WHIP / K9 for pitchers). The new fields lived in the JSON returned by `run_opponent_scouting_simple` and quietly informed the LLM's threat / weakness / strategy cards — but a user looking at the table couldn't see the underlying spray + arsenal data the model was citing. That's an unconvincing demo: "trust me, the LLM knows" is weaker than "look at the data the LLM used."
+
+### What changed in `app/tabs/opponent_scouting.py`
+
+**Top hitters table — added 6 new columns:**
+
+| Col | Source | Notes |
+|-----|--------|-------|
+| B   | `h["bats"]` | "R" / "L" / "S" / "—" |
+| GB% | `h["batted_ball"]["gb_pct"]` | Ground-ball rate |
+| FB% | `h["batted_ball"]["fb_pct"]` | Fly-ball rate |
+| Pull% | `h["batted_ball"]["pull_pct"]` | Pull-side spray % |
+| Cntr% | `h["batted_ball"]["straight_pct"]` | Center-field spray % |
+| Oppo% | `h["batted_ball"]["oppo_pct"]` | Opposite-field spray % |
+
+Each cell falls back to "—" when the hitter isn't in Savant's 253-row qualified pool, with a one-line caption explaining the null state. The whole Tier-1-coverage-cap conversation now lives in the UI itself rather than a docstring nobody reads.
+
+**Top pitchers table — added a Throws column (`T`)** plus a new **"Pitch arsenal — usage % and BA-against per pitch"** section beneath the headline table. Each of the 5 top pitchers gets a collapsed expander labeled with their handedness, role, and how many pitch types Statcast tracked for them. Opening the expander reveals a per-pitch dataframe with: Pitch / Usage % / PA / BA / SLG / Whiff % / Hard-hit %, sorted by usage descending (so the primary pitch is on top).
+
+Pitchers whose lookups returned empty (mid-leverage relievers below the 100-pitch threshold, September call-ups) get an inline explanation rather than an empty table. This matters because Statcast coverage is uneven — Sept-callup-heavy bullpens like Royals 2024 or Marlins 2024 will have multiple "Arsenal data unavailable" expanders.
+
+### Why expanders instead of a wide table
+
+I considered rendering one mega-table (5 pitchers × up to 6 pitch types = up to 30 rows) but the visual was incoherent — pitchers with one tracked pitch and pitchers with six couldn't share a row-per-pitch layout without leaving lots of empty cells. The expander approach also lets the user read the headline table first (who are the top 5 pitchers, how many pitch types each), then drill down only on the pitchers they care about. The expanded view is a compact dataframe that mirrors the headline-table style — visually consistent.
+
+### Verification (Playwright)
+
+`demo/verify_scouting_arsenal.py` drives the local Streamlit through the Opponent Scouting flow and screenshots both the unexpanded view (showing all 5 expanders + the new hitter spray columns) and the expanded view. Saved to:
+
+- `docs/checkpoint3/entry36_scouting_arsenal_full.png`
+- `docs/checkpoint3/entry36_scouting_arsenal_expanded.png`
+
+HOU 2024 scouting confirmed the new columns rendered correctly: Kyle Tucker B=L, 38.1% GB / 41.5% FB / 35.9% Pull. Pitcher expanders rendered with the correct "N tracked pitch types" labels (Hunter Brown: 3, Bryan Abreu: 2, Framber Valdez: 2, Ronel Blanco: 2, Taylor Scott: 1 — Scott had only his slider above the 100-pitch threshold).
+
+### What's deliberately NOT in this entry
+
+- **Roster Builder UI changes** — Roster Builder already shows the probable-starter's role/stats in the "Facing tonight" callout (Entry 23) and uses the arsenal data in the LLM-generated rationales. Adding a pitch-mix table there would duplicate the Opponent Scouting expander pattern; the Roster Builder's purpose is the lineup + matchup plan, not raw arsenal lookup. The data is still available in the "Reference data fed to the LLM" expander.
+- **Streamlit auto-redeploy** — push triggers a Cloud rebuild; if the deployed app stays stale (per the pattern from Entry 32), the user can manually reboot via the Streamlit Cloud dashboard. No code-side workaround needed.
+
+### Updated artifacts
+
+- `app/tabs/opponent_scouting.py` — hitter spray columns + pitcher arsenal expanders
+- `demo/verify_scouting_arsenal.py` — NEW Playwright verification script
+- `docs/checkpoint3/entry36_scouting_arsenal_full.png` — fixed-state screenshot
+- `docs/checkpoint3/entry36_scouting_arsenal_expanded.png` — expanded-pitcher screenshot
+
+**Time: ~30 minutes (10 design + UI code, 10 Playwright script + screenshots, 10 writeup).**
+
+---
