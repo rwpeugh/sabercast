@@ -266,6 +266,47 @@ TIER_PREMIUM_MIN_CAP   = 30_000_000   # ...but always cover up to $30M
 TIER_ORDER             = ("bargain", "medium", "premium")
 
 
+def _expected_cost_for_tier(target: dict,
+                             pricing_comparables: list[dict] | None) -> float:
+    """Deterministic per-target estimate of what this player would COST GOING
+    FORWARD, used for tier classification.
+
+    Entry 37 fix. Previously tier classification used ``target['aav']``, the
+    player's HISTORICAL contract AAV. But the user sees ``forecast_aav`` (the
+    gpt-4o-mini prediction of what a new deal would command). When the
+    forecast diverges meaningfully from history (a player signed for $4M in
+    2022 might forecast at $15M today after a breakout), the user can end up
+    seeing a "bargain" badge on a candidate whose forecast cost is higher
+    than the at-budget pick's. That inversion is the bug.
+
+    Our deterministic estimator carries forward the larger of:
+      1. The player's existing AAV (they won't take a paycut)
+      2. The median pricing-comparable AAV at that position (market drift)
+
+    Both floors are cheap to compute, no LLM call, and approximate what the
+    expensive gpt-4o-mini forecast would say. Tier classification uses this
+    estimate; the LLM forecast still runs for the surfaced targets and
+    populates ``forecast_aav`` for the display. They should USUALLY agree
+    closely because both proxy the same forward-looking quantity.
+    """
+    hist_aav = target.get("aav") or 0
+    try:
+        hist_aav = float(hist_aav)
+    except (TypeError, ValueError):
+        hist_aav = 0.0
+
+    market_floor = 0.0
+    if pricing_comparables:
+        aavs = [float(c.get("aav", 0) or 0) for c in pricing_comparables]
+        aavs = [a for a in aavs if a > 0]
+        if aavs:
+            aavs.sort()
+            market_floor = aavs[len(aavs) // 2]   # median
+
+    expected = max(hist_aav, market_floor)
+    return expected if expected > 0 else hist_aav   # fall back to historical
+
+
 def _classify_target_tier(aav: float | None,
                             single_signing_ceiling: float) -> str:
     """Bucket a candidate's AAV into ``bargain`` / ``medium`` / ``premium``.
@@ -274,6 +315,10 @@ def _classify_target_tier(aav: float | None,
     (30% of available room after committed payroll). For over-committed
     teams (ceiling <= 0), every candidate is considered "premium" since
     nothing fits under-budget.
+
+    NB. Callers should pass the FORWARD-LOOKING expected cost (see
+    ``_expected_cost_for_tier``), not the historical signed AAV. Using
+    historical AAV here was the source of the Entry 37 inversion bug.
     """
     if aav is None or aav <= 0:
         return "premium"
@@ -288,17 +333,85 @@ def _classify_target_tier(aav: float | None,
 
 def _pick_top_per_tier(targets: list[dict],
                         single_signing_ceiling: float,
-                        max_per_tier: int = 1) -> list[dict]:
-    """Pick the best ``max_per_tier`` candidates from each AAV tier by
-    composite improvement score. Returns them in bargain→medium→premium order.
+                        max_per_tier: int = 1,
+                        pricing_comparables: list[dict] | None = None,
+                        incumbent_aav: float | None = None,
+                        cost_field: str = "forecast_aav") -> list[dict]:
+    """Pick the best ``max_per_tier`` candidates from each forward-cost tier
+    by composite improvement score. Returns them in bargain→medium→premium
+    order. Annotates each target with ``expected_cost`` (used for tier),
+    ``tier``, and (when applicable) ``is_downgrade_save`` + ``savings_vs_incumbent``.
+
+    The ``cost_field`` parameter controls which target attribute drives the
+    tier classification. Default ``"forecast_aav"`` (Entry 37) matches what
+    the user sees in the UI: the gpt-4o-mini forecast of what this player
+    would command on a new deal. Callers that don't have the forecast yet
+    can pass ``"aav"`` (historical) or rely on the deterministic
+    ``_expected_cost_for_tier`` fallback by passing ``cost_field="expected"``.
+
+    Negative-composite filter (Entry 37). A candidate whose
+    ``composite_score < 0`` is, by construction, worse than the team's
+    current incumbent at the gap position. We only surface such candidates
+    when they're meaningfully CHEAPER than the incumbent (so the GM has a
+    real "save money but lose performance" option to weigh). Otherwise the
+    candidate is dropped from consideration -- they're a downgrade with no
+    upside and have no business on the recommendation card.
 
     Over-committed special case: when the ceiling is zero, bargain and medium
     are empty by construction. In that case we fall back to returning the
     top-3 premium candidates so the user still gets recommendations (with the
     "over-committed" warning surfaced via ``over_committed`` upstream).
     """
+    # Stage 1: pick the cost basis per candidate and tier-classify.
+    # forecast_aav is preferred (matches what the user sees); fall back to
+    # the deterministic estimator (Entry 37 helper) only when forecast is
+    # missing.
     for t in targets:
-        t["tier"] = _classify_target_tier(t.get("aav"), single_signing_ceiling)
+        if cost_field == "forecast_aav" and t.get("forecast_aav"):
+            cost = float(t["forecast_aav"])
+        elif cost_field == "aav" and t.get("aav"):
+            cost = float(t["aav"])
+        else:
+            cost = _expected_cost_for_tier(t, pricing_comparables)
+        t["expected_cost"] = cost
+        t["tier"] = _classify_target_tier(cost, single_signing_ceiling)
+
+    # Stage 2: negative-composite filter. Drop downgrade candidates unless
+    # they save real money vs the incumbent. Surviving negative-composite
+    # candidates carry a ``is_downgrade_save`` flag the UI surfaces.
+    filtered: list[dict] = []
+    for t in targets:
+        comp = t.get("composite_score")
+        if comp is None:
+            # No composite available (DH-only, missing data, etc.) -- keep,
+            # since we can't make the downgrade judgement.
+            filtered.append(t)
+            continue
+        try:
+            comp_f = float(comp)
+        except (TypeError, ValueError):
+            filtered.append(t)
+            continue
+        if comp_f >= 0:
+            # Upgrade or neutral -- keep as a regular recommendation.
+            filtered.append(t)
+            continue
+        # comp_f < 0: candidate is a downgrade vs incumbent. Only surface
+        # them when there's a meaningful cost saving available.
+        if incumbent_aav is None or incumbent_aav <= 0:
+            # We don't know the incumbent's cost, so we can't validate the
+            # save-money tradeoff. Drop the candidate rather than recommend
+            # a downgrade with no clear upside.
+            continue
+        savings = incumbent_aav - t["expected_cost"]
+        if savings <= 0:
+            # Downgrade AND not cheaper -- drop.
+            continue
+        # Real save-money downgrade. Flag for UI.
+        t["is_downgrade_save"]      = True
+        t["savings_vs_incumbent"]   = round(savings, 0)
+        filtered.append(t)
+    targets = filtered
 
     def _rank_key(t: dict) -> tuple[float, float]:
         comp = t.get("composite_score")
@@ -2318,25 +2431,55 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             t["composite_score"]       = deltas["composite_score"]
             t["delta_breakdown"]       = deltas["breakdown"]
 
-        # Bucket by AAV tier (bargain / medium / premium) and pick top-1 per
-        # tier by composite improvement score. Result is ordered bargain ->
-        # medium -> premium so the UI reads cheap-to-expensive. The classifier
-        # tags each target with a ``tier`` field for downstream UI badges.
-        targets = _pick_top_per_tier(targets, single_signing_ceiling,
-                                       max_per_tier=1)
+        # Pre-tier pool: top-6 candidates by composite_score. Entry 37 changed
+        # the flow so that tier classification happens AFTER the gpt-4o-mini
+        # forecast call (using forecast_aav, not historical aav). To avoid
+        # blowing up LLM call counts, we forecast 6 per gap rather than the
+        # full 20; the top-6 by composite are very likely to cover all three
+        # tiers since composite ordering is roughly orthogonal to AAV.
+        def _composite_key(t: dict) -> float:
+            v = t.get("composite_score")
+            return float(v) if v is not None else -1e9
+        candidate_pool = sorted(targets, key=_composite_key, reverse=True)[:6]
 
-        target_names = {t.get("player_name") for t in targets if t.get("player_name")}
+        # Pricing comparables (informs the forecast LLM and the deterministic
+        # fallback estimator).
         pricing_comparables = _pick_pricing_comparables(
             contracts, batting, pitching, pos, evaluation_year, k=3,
-            exclude_names=target_names,
+            exclude_names=set(),
         )
+
+        # Look up the incumbent's contract AAV from contracts.csv. Needed
+        # for the negative-composite "save-money downgrade" filter so we
+        # can validate that the candidate is actually cheaper than the
+        # incumbent before surfacing them as a downgrade option.
+        incumbent_aav: float | None = None
+        if incumbent and incumbent.get("primary_player"):
+            try:
+                inc_name = incumbent["primary_player"]
+                folded = "".join(c for c in inc_name.lower() if c.isalnum())
+                m = contracts[
+                    contracts["player_name"].astype(str).str.lower().str.replace(
+                        r"[^a-z0-9]", "", regex=True
+                    ) == folded
+                ]
+                m = m[m["signed_year"].fillna(9999) <= evaluation_year]
+                if not m.empty:
+                    aavs = pd.to_numeric(m["aav"], errors="coerce").dropna().tolist()
+                    if aavs:
+                        incumbent_aav = float(max(aavs))   # most recent / largest deal
+            except Exception:                                   # noqa: BLE001
+                incumbent_aav = None
+
         prepared_gaps.append({
             "idx":                 idx,
             "gap":                 gap,
             "pos":                 pos,
-            "targets":             targets,
+            "candidate_pool":      candidate_pool,        # pre-tier (size up to 6)
+            "targets":             [],                    # filled post-forecast
             "targets_source":      targets_source,
             "incumbent":           incumbent,
+            "incumbent_aav":       incumbent_aav,
             "pricing_comparables": pricing_comparables,
         })
 
@@ -2445,14 +2588,18 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
 
     # max_workers sized to the total parallelizable calls; thread pool handles
     # OpenAI rate limits gracefully via httpx's connection pooling.
-    n_calls = len(prepared_gaps) + total_targets
-    with ThreadPoolExecutor(max_workers=max(4, min(n_calls, 12))) as ex:
+    # Forecast for the full candidate_pool (up to 6 per gap, ~18 total) so
+    # tier classification can use forecast_aav rather than historical aav
+    # (Entry 37). Pricing estimates are unchanged (1 per gap).
+    total_pool = sum(len(pg["candidate_pool"]) for pg in prepared_gaps)
+    n_calls = len(prepared_gaps) + total_pool
+    with ThreadPoolExecutor(max_workers=max(4, min(n_calls, 16))) as ex:
         # Submit all estimate calls
         est_futures = [ex.submit(_safe_estimate, pg) for pg in prepared_gaps]
-        # Submit all forecast calls
+        # Submit all forecast calls (one per candidate in the pool)
         fc_futures = []
         for pg in prepared_gaps:
-            for target in pg["targets"]:
+            for target in pg["candidate_pool"]:
                 fc_futures.append(ex.submit(_safe_forecast, pg["idx"], target,
                                             pg["pos"], pg["pricing_comparables"],
                                             pg.get("incumbent"), pg["gap"]))
@@ -2464,6 +2611,37 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
         for fut in fc_futures:
             idx, name, fc = fut.result()
             forecasts_by_key[(idx, name)] = fc
+
+    # ── Step C2 (Entry 37): tier-classify by forecast_aav + pick top-1 per tier
+    # Now that every candidate has a forecast_aav attached, we can tier-bucket
+    # by the number the user will actually see (what they'd pay going forward),
+    # not the player's historical contract AAV. The negative-composite filter
+    # also runs here: a candidate worse than the incumbent only survives if
+    # they're meaningfully cheaper.
+    for pg in prepared_gaps:
+        # Attach forecasts onto the pool candidates so _pick_top_per_tier
+        # has the numbers it needs to classify.
+        for c in pg["candidate_pool"]:
+            fc = forecasts_by_key.get((pg["idx"], c["player_name"]), {})
+            c["forecast_aav"]              = fc.get("forecast_aav")
+            c["forecast_years"]            = fc.get("forecast_years")
+            c["forecast_rationale"]        = fc.get("forecast_rationale", "")
+            c["rationale_source"]          = fc.get("rationale_source")
+            c["rationale_hallucinations"]  = fc.get("rationale_hallucinations", [])
+        pg["targets"] = _pick_top_per_tier(
+            pg["candidate_pool"], single_signing_ceiling,
+            max_per_tier=1,
+            pricing_comparables=pg["pricing_comparables"],
+            incumbent_aav=pg.get("incumbent_aav"),
+            cost_field="forecast_aav",
+        )
+        # Dedup: drop any pricing comparable that ended up as a surfaced target
+        target_names = {t.get("player_name") for t in pg["targets"]
+                        if t.get("player_name")}
+        pg["pricing_comparables"] = [
+            c for c in pg["pricing_comparables"]
+            if c.get("player_name") not in target_names
+        ]
 
     # ── Step D: sequential post-processing (rationale linking, premium flags) ─
     results = []
@@ -2490,15 +2668,11 @@ def run_gap_filler_simple(team_abbr: str = "SEA",
             pc["rationale"]      = llm_rationales.get(pc["player_name"], "")
             pc["is_also_target"] = pc["player_name"] in target_name_set
 
-        # Attach forecasts to targets + compute premium flags
+        # Forecasts were already attached in Step C2 (Entry 37) so tier-classify
+        # could run by forecast_aav. Here we only need to compute the
+        # estimate-relative premium flags.
         est_aav = estimate.get("estimated_aav")
         for t in targets:
-            fc = forecasts_by_key.get((pg["idx"], t["player_name"]), {})
-            t["forecast_aav"]              = fc.get("forecast_aav")
-            t["forecast_years"]            = fc.get("forecast_years")
-            t["forecast_rationale"]        = fc.get("forecast_rationale", "")
-            t["rationale_source"]          = fc.get("rationale_source")
-            t["rationale_hallucinations"]  = fc.get("rationale_hallucinations", [])
             f_aav = t.get("forecast_aav")
             if est_aav and f_aav:
                 t["premium_vs_estimate"] = round(f_aav / est_aav - 1.0, 2)

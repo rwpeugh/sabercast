@@ -649,6 +649,24 @@ def _render_gap_card(idx: int, gr: dict, budget: float, evaluation_year: int) ->
                                 f"margin-bottom:6px'>{label}</div>",
                                 unsafe_allow_html=True,
                             )
+                        # Entry 37: downgrade-save chip. Surfaces when this
+                        # candidate is worse than the incumbent (negative
+                        # composite) BUT cheaper, so the GM gets an explicit
+                        # "save money, lose performance" tradeoff card rather
+                        # than being told this is an improvement.
+                        if t.get("is_downgrade_save"):
+                            savings = t.get("savings_vs_incumbent") or 0
+                            savings_str = _html_money(savings)
+                            st.markdown(
+                                f"<div style='display:inline-block;padding:2px 8px;"
+                                f"font-size:0.72em;font-weight:700;letter-spacing:0.5px;"
+                                f"background:#FFF4D6;color:#8A6A00;"
+                                f"border:1px solid #E5C870;border-radius:3px;"
+                                f"margin-left:6px;margin-bottom:6px'>"
+                                f"DOWNGRADE &mdash; SAVES {savings_str}/YR"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
                         name_line = f"**{t['player_name']}**"
                         if t.get("is_expensive_vs_estimate"):
                             pct = int((t.get("premium_vs_estimate") or 0) * 100)

@@ -1915,3 +1915,87 @@ HOU 2024 scouting confirmed the new columns rendered correctly: Kyle Tucker B=L,
 **Time: ~30 minutes (10 design + UI code, 10 Playwright script + screenshots, 10 writeup).**
 
 ---
+
+## Entry 37 — June 7: Tier classification by forecast AAV, plus downgrade-save filter
+
+**User catch.** *"Ran some roster gap evaluations and the tool is returning higher AAV players in bargain recommendation than in at-budget recommendation. The tool should also only recommend a player with a negative impact to composite score if that player is cheaper. The tool should then call that out for the user to see."*
+
+Two distinct bugs in the deployed Gap Filler, both rooted in the same architectural choice that was wrong from Entry 29 onward.
+
+### Bug 1 — Tier classification used historical AAV, but the user sees forecast AAV
+
+`_classify_target_tier` bucketed candidates by their historical contract AAV (`target["aav"]`, what they were signed for years ago) into bargain (≤ 50% of ceiling), at-budget (≤ ceiling), and premium (> ceiling). But the AAV displayed to the user in every target card is the gpt-4o-mini `forecast_aav` (what this player would command on a new deal today). When the two diverge meaningfully, the tier labels invert.
+
+Concrete case from the SEA 2024 evaluation that surfaced the bug: Brandon Lowe was tier-classified bargain at his historical $4M AAV, but his forecast was $15M, while the at-budget pick Marcus Semien had historical $25M but forecast $22M. The user sees a bargain badge on a card showing $15M and an at-budget badge on a card showing $22M, which is fine for SEA's specific ceiling but the inversion can flip the other way for breakout players on pre-arb deals whose forecast far exceeds anyone in the at-budget tier.
+
+The fix is conceptually simple: tier-classify by `forecast_aav`, not historical AAV. The implementation required reordering the pipeline because forecasts run AFTER tier classification in the original flow.
+
+### Bug 2 — Negative-composite candidates surfacing with no actionable angle
+
+The composite score is normalized improvement vs the incumbent. A candidate with composite < 0 is, by construction, worse than the team's current player at the position. The deployed system was surfacing those candidates as recommendations anyway, which made no sense unless the candidate was cheaper than the incumbent (in which case the "save money, lose performance" tradeoff is legitimate).
+
+The user's directive: filter out negative-composite candidates UNLESS they're meaningfully cheaper than the incumbent, and call out the trade-off when one survives. The fix needs to know the incumbent's contract AAV, which required a new lookup against contracts.csv.
+
+### Implementation
+
+**Pipeline reorder** in `run_gap_filler_simple`:
+
+```
+OLD:  retrieve top-20 → compute composite → tier-classify by aav → pick top-1 per tier
+      → forecast 3 (in parallel) → render
+
+NEW:  retrieve top-20 → compute composite → take top-6 by composite (pre-tier pool)
+      → forecast 6 (in parallel) → tier-classify by forecast_aav → pick top-1 per tier
+      (with negative-composite filter) → render
+```
+
+Why top-6 not top-3 for the pre-tier pool: the pool needs enough candidates that all three tiers can find at least one when bucketed by forecast cost. Composite ordering is roughly orthogonal to forecast AAV (a cheap fringe-veteran upgrade can have a higher composite than an expensive star at a non-priority position), so top-6 by composite reliably contains a spread of forecast AAVs. The cost is 6 forecast calls per gap × 3 gaps = 18 LLM calls instead of the previous 9. With concurrent execution via `ThreadPoolExecutor(max_workers=16)`, end-to-end latency went from ~9s to ~10.5s, well within budget.
+
+**New `_expected_cost_for_tier` helper** as a deterministic fallback when the LLM forecast is unavailable (eval scripts, vectorstore unavailable, etc.). Uses `max(historical_aav, median_pricing_comparable_aav)` to roughly approximate forward cost without an LLM call. The live pipeline never uses this path because forecasts always run before tier classification, but the helper keeps the eval pipeline working.
+
+**Negative-composite filter** in `_pick_top_per_tier`. After tier classification:
+
+```python
+for t in targets:
+    comp = t.get("composite_score")
+    if comp is None or comp >= 0:
+        keep(t)                                  # upgrade or unknown -- normal flow
+    elif incumbent_aav and t.expected_cost < incumbent_aav:
+        t["is_downgrade_save"]    = True
+        t["savings_vs_incumbent"] = incumbent_aav - t.expected_cost
+        keep(t)                                  # downgrade WITH savings -- surface w/ flag
+    else:
+        drop(t)                                  # downgrade with NO upside -- drop
+```
+
+The incumbent AAV lookup walks contracts.csv for the team's identified incumbent at the gap position. Uses ASCII-folded name matching (consistent with the rest of the orchestrator's name handling), filters by signed_year ≤ evaluation_year, and takes the max of any matching contracts. Returns None when no contract exists in our pool, in which case the filter drops all negative-composite candidates (we can't validate the savings without knowing the incumbent's cost).
+
+**UI surfaces the flag** in `app/tabs/gap_filler.py`. Each tier-badged card now also renders a yellow `DOWNGRADE — SAVES $X/YR` chip next to the tier badge when `is_downgrade_save` is set. The chip color (warm yellow on light-amber) is intentionally less prominent than the green/blue/orange tier badges, because this is an information signal, not a primary recommendation channel.
+
+### Verification across teams
+
+Running the pipeline over SEA, LAD, NYY, and PHI at realistic budgets:
+
+| Team | Gap | bargain $ | at-budget $ | premium $ | Notes |
+|------|-----|----------:|------------:|----------:|-------|
+| SEA  | 2B  | $8.0M (Solano) | $20.0M (Lowe) | $26.0M (Semien) | strictly increasing |
+| SEA  | RF  | $8.0M (Duvall) | $15.0M (Grichuk) | $36.0M (Trout) | strictly increasing |
+| LAD  | 2B  | $8.0M (Solano) | $15.0M (Albies) | $26.0M (Semien) | strictly increasing |
+| NYY  | 2B  | — | $8.0M (Solano) | $22.0M (Semien) | tight ceiling ($8.5M) |
+| PHI  | RF  | — | $8.0M (Renfroe) | $15.0M (Grichuk) | **downgrade chip on Renfroe (composite -0.15, saves $12M/yr vs $20M Castellanos)** |
+
+The PHI RF case is the cleanest demonstration of the fix actually doing what the user asked. Renfroe is a downgrade vs Castellanos (composite -0.15) but $12M cheaper. The card surfaces the downgrade trade-off explicitly so the GM can weigh "lose 0.15 OPS-equivalent for $12M of payroll relief" as a real option, rather than seeing Renfroe presented as a generic recommendation with no acknowledgement of the regression.
+
+### One subtlety — eval-pipeline divergence
+
+`eval/precision_at_k_full_pipeline.py` does NOT call `forecast_target_contract_llm` (the LLM forecast is expensive and the eval is meant to be cheap to re-run). It calls `_pick_top_per_tier` directly. With the Entry 37 change, that call now falls through to the deterministic `_expected_cost_for_tier` because `forecast_aav` is unset. The deterministic estimator approximates the LLM forecast but is not identical. Re-running the eval after Entry 37 produces precision@3 = 9.3% (4/43), bit-for-bit identical to the pre-fix number. The same surface candidates land in top-3 because composite ordering dominates and the tier labels mostly stay consistent. The headline claim in the final report still holds.
+
+### Updated artifacts
+
+- `core/orchestrator.py` — `_expected_cost_for_tier` (NEW), `_pick_top_per_tier` (signature + body changed), `_classify_target_tier` (docstring), `run_gap_filler_simple` (Step B + C2 restructured)
+- `app/tabs/gap_filler.py` — downgrade-save chip rendering
+- The deployed Streamlit Cloud app will pick up both fixes after the push.
+
+**Time: ~75 minutes (10 reproducing the bug across multiple teams, 20 designing the pipeline reorder, 25 implementing + testing the helpers, 10 UI chip, 10 verification + writeup).**
+
+---
