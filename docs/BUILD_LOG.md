@@ -2044,3 +2044,56 @@ Smoke test on LAD vs DET with Skubal as probable starter. Narrative: *"Against T
 **Time: ~25 minutes (10 prompt + orchestrator edits, 10 UI cleanup + final-report fix, 5 smoke test + writeup).**
 
 ---
+
+## Entry 39 — June 7: Defensive vulnerabilities panel justifies lineup decisions
+
+**User refinement of Entry 38.** *"The Roster Builder tab should still list specific defensive weaknesses that contributed to the lineup construction. So if it says utilize this player to target weak 1B defense, have a section that also explains the weak defense and justifies it."*
+
+Entry 38 was correct to remove the generic "Matchup advantages / risks" cards because those duplicated the Opponent Scouting tab. But it was wrong to strip out ALL the supporting evidence the user could use to verify the lineup rationales. When a slot rationale says "Ty France targets weak 1B defense," the user should be able to look at the same screen and see the actual Statcast OAA number that justifies "weak."
+
+This entry adds back a focused defensive-vulnerabilities section that sits between the lineup and the reference-data expander. It's deliberately different from the deleted Matchup analysis section in two ways: (1) it's pure data, not LLM-generated narrative, and (2) it shows ONLY the position-by-position OAA deltas, which directly support the lineup rationale's "weak X" claims. It does not produce general attack strategy or threat assessment, both of which still live in Opponent Scouting.
+
+### Implementation
+
+**`app/tabs/roster_builder.py`** gets a new section between the lineup table and the reference-data expander. The section renders only when the opponent has at least one position notably below league average (delta < -1.0 OAA) or a slow catcher pop time (positive pop_2b_delta > 0.020s). When neither condition holds, a brief caption replaces it explaining that lineup ordering was driven by pitcher arsenal + platoon matchups alone, not by weak-defender targeting.
+
+Each surfaced weak position renders as a small bordered card with:
+  * Position abbreviation + OAA delta (red-tinted to signal weakness)
+  * Team's raw OAA and league average for that position
+  * A "Target with" hint mapping spray tendency to position, e.g. "1B: Pulled GBs by LHH; oppo by RHH"
+
+The catcher pop-time callout (when applicable) gets its own card with a "manufacture runs on steals" caption.
+
+**`ROSTER_BUILDER_SYSTEM` prompt** gets a small instruction reminding gpt-4o that when it references the opponent's weak defense in a lineup rationale, it must name the SPECIFIC POSITION (e.g. "weak 2B") rather than vague language ("middle infield") because the user will see position-level numbers in the panel below and the rationale should cross-reference them precisely.
+
+### Verification
+
+Smoke test on SEA vs HOU (default settings, 2024). HOU 2024 has weak defense at 2B (-11.1 OAA), 1B (-5.5), SS (-5.1), and LF (-2.5), plus a catcher with slightly slow pop time (+0.026s).
+
+The lineup rationales correctly name those positions:
+  * #2 LF Luke Raley — "Left handed bat to exploit weak 1B defense"
+  * #7 1B Ty France — "Right handed bat to exploit weak 1B defense"
+  * #8 SS J.P. Crawford — "Switch hitter to exploit weak 2B defense"
+  * #9 2B Jorge Polanco — "Switch hitter to provide balance at the bottom"
+
+The narrative explicitly states the strategy: "Without a confirmed probable starter for Houston, the lineup is constructed to exploit the Astros' defensive weaknesses, particularly at 1B and 2B. The Mariners will focus on placing hitters who can pull the ball effectively against these positions, while also considering overall OPS and on-base capabilities."
+
+The panel below shows the supporting numbers for each of those claims. Screenshot at `docs/checkpoint3/entry39_def_vulnerabilities_zoom.png`.
+
+LAD vs DET smoke test (Skubal probable) shows a different cross-reference: rationale "Max Muncy — Left-handed power bat, exploits weak SS defense" with the panel showing SS at -2.07 OAA. Different opponent, same pattern: rationale references specific position, panel justifies it.
+
+### What this entry is NOT
+
+It is not a return of "Matchup advantages / risks." There are no LLM-generated cards on the Roster Builder tab. The defensive panel is pure structured data drawn from `data/raw/oaa_2024.csv` and `catcher_defense_2024.csv` (with sprint speed available but deliberately not surfaced because it does not directly inform lineup ordering). Opponent Scouting still owns the generic attack-strategy content.
+
+### Updated artifacts
+
+- `app/tabs/roster_builder.py` (defensive-vulnerabilities section)
+- `core/orchestrator.py` (ROSTER_BUILDER_SYSTEM prompt — position specificity instruction)
+- `demo/verify_entry39_def_vulnerabilities.py` (NEW Playwright script)
+- `docs/checkpoint3/entry39_def_vulnerabilities.png` (full Roster Builder tab)
+- `docs/checkpoint3/entry39_def_vulnerabilities_zoom.png` (focused view of the new section)
+
+**Time: ~25 minutes (10 UI section design + spray-hint mapping, 5 prompt nudge, 5 smoke test, 5 Playwright + writeup).**
+
+---

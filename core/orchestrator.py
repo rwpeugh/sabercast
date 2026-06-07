@@ -2938,7 +2938,15 @@ report. The narrative and per-slot rationales should explain WHO bats
 where and WHY in this specific matchup. Do NOT produce general "how to
 attack this team" strategy or "exploitable weaknesses" content -- that
 duplicates the Opponent Scouting tab which the user can open separately
-for the same team."""
+for the same team.
+
+DEFENSIVE-WEAKNESS REFERENCES (Entry 39): when a lineup rationale
+references the opponent's weak defense at a specific position (e.g.
+"target the weak 2B"), name the position EXPLICITLY in the rationale.
+The UI surfaces the per-position OAA deltas in a dedicated card below
+the lineup so the user can cross-reference. Rationales should say "weak
+2B" not "weak middle infield" -- specificity matters because the user
+sees the position-level numbers directly."""
 
 
 def build_roster_llm(team_abbr: str, opponent_abbr: str,

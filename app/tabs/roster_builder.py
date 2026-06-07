@@ -206,6 +206,109 @@ def render() -> None:
     # Roster Builder now produces just the lineup; users open Opponent
     # Scouting separately for "how to attack this team" content.
 
+    # ── Entry 39: opponent defensive vulnerabilities (lineup justification) ──
+    # The lineup rationales sometimes reference positions where the opponent
+    # is below league average (e.g. "favor hitters who pull-side to the weak
+    # 2B"). This section surfaces the underlying OAA numbers + catcher pop
+    # time so the user can verify those claims. Lives in Roster Builder
+    # specifically because it directly supports the lineup decisions; it is
+    # NOT the same content as Opponent Scouting's general scouting cards.
+    import html as _html
+    opp_def = result.get("opponent_defense_deltas") or {}
+    by_pos  = opp_def.get("by_position") or {}
+    # Show positions notably below league average (delta < -1.0 OAA).
+    # 1.0 OAA is roughly the per-position noise floor; flagging at -1.0
+    # avoids surfacing meaningless rounding-error deltas.
+    weak_positions = sorted(
+        [(pos, d) for pos, d in by_pos.items()
+         if (d.get("oaa_delta_vs_league_per_team") or 0) < -1.0],
+        key=lambda x: x[1].get("oaa_delta_vs_league_per_team") or 0,
+    )
+    catcher = opp_def.get("catcher") or {}
+    # Pop-time interpretation: NEGATIVE delta means opponent's catcher is
+    # FASTER than average (harder to steal); POSITIVE delta means the
+    # catcher is SLOWER (easier to steal). We surface positive pop deltas
+    # as a steal opportunity.
+    pop_delta = catcher.get("pop_2b_delta")
+    steal_callout = (pop_delta is not None and pop_delta > 0.020)
+
+    if weak_positions or steal_callout:
+        st.markdown(
+            f"### Opponent defensive vulnerabilities driving lineup decisions"
+        )
+        st.caption(
+            f"{result['opponent']}'s 2024 defensive weak spots, with the same "
+            "Statcast OAA data the LLM used to order the lineup above. Hitters "
+            "whose spray tendencies send batted balls toward these positions "
+            "have a higher hit probability than against a league-average defender."
+        )
+
+        # Position-by-position weak-defense cards
+        if weak_positions:
+            spray_hint = {
+                "1B": ("Pulled GBs by LHH; oppo by RHH"),
+                "2B": ("Pulled GBs by LHH; oppo by RHH"),
+                "3B": ("Pulled GBs by RHH; oppo by LHH"),
+                "SS": ("Pulled GBs by RHH; oppo by LHH"),
+                "LF": ("Pulled FBs by RHH; oppo by LHH"),
+                "CF": ("Centered FBs and LDs by either hand"),
+                "RF": ("Pulled FBs by LHH; oppo by RHH"),
+            }
+            cols = st.columns(len(weak_positions))
+            for (pos, d), col in zip(weak_positions, cols):
+                delta = float(d.get("oaa_delta_vs_league_per_team") or 0)
+                team_oaa = d.get("team_oaa_total")
+                league_avg = float(d.get("league_avg_per_team") or 0)
+                with col:
+                    with st.container(border=True):
+                        st.markdown(
+                            f"<div style='font-weight:700;font-size:1.1em;"
+                            f"color:#B33A3A;margin-bottom:2px'>"
+                            f"{_html.escape(pos)} &nbsp;"
+                            f"<span style='font-size:0.85em;font-weight:600'>"
+                            f"{delta:+.1f} OAA</span></div>",
+                            unsafe_allow_html=True,
+                        )
+                        st.caption(
+                            f"Team OAA: {team_oaa}  ·  League avg: {league_avg:+.1f}"
+                        )
+                        hint = spray_hint.get(pos, "")
+                        if hint:
+                            st.markdown(
+                                f"<div style='font-size:0.85em;color:#555;"
+                                f"margin-top:6px;line-height:1.4'>"
+                                f"<b>Target with:</b> {_html.escape(hint)}"
+                                f"</div>",
+                                unsafe_allow_html=True,
+                            )
+
+        # Catcher pop-time callout (separate from OAA positions)
+        if steal_callout:
+            team_pop = catcher.get("team_pop_2b_mean", 0)
+            lg_pop   = catcher.get("league_pop_2b_mean", 0)
+            with st.container(border=True):
+                st.markdown(
+                    f"<div style='font-weight:700;font-size:1.05em;color:#B33A3A'>"
+                    f"Catcher slow to second &nbsp;"
+                    f"<span style='font-size:0.85em;font-weight:600'>"
+                    f"{pop_delta:+.3f}s pop time vs league</span></div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    f"Team pop 2B: {team_pop:.3f}s  ·  League avg: {lg_pop:.3f}s. "
+                    "Slot players with above-average sprint speed in the high-"
+                    "leverage spots if you want to manufacture runs on steals."
+                )
+    else:
+        # No notable weaknesses surfaced; lineup decisions were driven by
+        # opponent pitcher arsenal + hitter platoon alone.
+        st.caption(
+            f"_{result['opponent']}'s defense is at or above league average at "
+            "every position; lineup ordering above is driven by the probable "
+            "starter's arsenal and platoon matchups rather than spray-to-"
+            "weak-defender reasoning._"
+        )
+
     st.caption("For general opponent attack strategy, threat assessment, and "
                "exploitable weaknesses, see the **Opponent Scouting** tab.")
 
