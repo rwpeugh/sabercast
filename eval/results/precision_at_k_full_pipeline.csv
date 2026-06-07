@@ -1,0 +1,44 @@
+team,position,player,pool_size,n_candidates,tier_bucketed_3,tiers_filled,ceiling,committed,total_budget,retrieval_rank,actual_tier,in_top_3_pipeline,in_top_3_retrieval,in_retrieval_pool
+NYM,RF,Juan Soto,51,16,Jason Heyward;Randal Grichuk;Anthony Santander,"['bargain', 'medium', 'premium']",5727755.0,323210494.0,342303011.0,,,False,False,False
+ARI,SP,Corbin Burnes,267,20,Trevor Williams;Spencer Turnbull;Sonny Gray,"['premium', 'premium', 'premium']",0.0,178809082.0,177499443.0,,,False,False,False
+SF,SS,Willy Adames,53,18,Bobby Witt Jr.;Dansby Swanson;Willy Adames,"['premium', 'premium', 'premium']",0.0,209092069.0,178812152.0,4.0,premium,True,False,True
+HOU,2B,Jose Altuve,58,14,Ketel Marte;Marcus Semien;Andres Gimenez,"['premium', 'premium', 'premium']",0.0,249670553.0,232400487.0,5.0,premium,False,False,True
+TEX,SP,Nathan Eovaldi,267,20,Trevor Williams;Spencer Turnbull;Sean Manaea,"['premium', 'premium', 'premium']",0.0,228045408.0,226526491.0,,,False,False,False
+BOS,3B,Alex Bregman,49,9,Luis Urias;Josh Rojas;Matt Chapman,"['bargain', 'medium', 'premium']",3924603.0,190676844.0,203758855.0,,,False,False,False
+LAD,LF,Teoscar Hernandez,64,20,Alex Verdugo;Lourdes Gurriel Jr.;Christian Yelich,"['bargain', 'medium', 'premium']",24985169.0,266740208.0,350024106.0,20.0,medium,False,False,True
+LAA,SP,Yusei Kikuchi,267,20,Spencer Turnbull;Trevor Williams;Blake Snell,"['bargain', 'medium', 'premium']",11380222.0,172486921.0,210420995.0,,,False,False,False
+HOU,1B,Christian Walker,55,18,Bryce Harper;Christian Walker;Carlos Santana,"['premium', 'premium', 'premium']",0.0,249670553.0,232400487.0,10.0,premium,True,False,True
+NYM,1B,Pete Alonso,55,18,Dominic Smith;Rowdy Tellez;Bryce Harper,"['bargain', 'medium', 'premium']",5727755.0,323210494.0,342303011.0,3.0,premium,False,True,True
+ATL,LF,Jurickson Profar,64,20,Joc Pederson;Christian Yelich;Kyle Schwarber,"['premium', 'premium', 'premium']",0.0,238128381.0,220611106.0,12.0,premium,False,False,True
+LAD,LF,Michael Conforto,64,20,Alex Verdugo;Lourdes Gurriel Jr.;Christian Yelich,"['bargain', 'medium', 'premium']",24985169.0,266740208.0,350024106.0,8.0,medium,False,False,True
+DET,2B,Gleyber Torres,58,15,Brandon Lowe;Andres Gimenez;Ketel Marte,"['bargain', 'medium', 'premium']",17977340.0,98617894.0,158542361.0,9.0,medium,False,False,True
+WSH,SP,Trevor Williams,267,20,Trevor Williams,['premium'],192048.0,108825764.0,109465924.0,8.0,premium,True,False,True
+LAD,2B,Hyeseong Kim,58,14,Brandon Lowe;Ketel Marte;Marcus Semien,"['bargain', 'medium', 'premium']",24985169.0,266740208.0,350024106.0,,,False,False,False
+PHI,RF,Max Kepler,51,19,Randal Grichuk;Max Kepler;Juan Soto,"['bargain', 'medium', 'premium']",15018469.0,245253627.0,295315191.0,16.0,medium,True,False,True
+BAL,RP,Andrew Kittredge,337,20,Scott Alexander;Blake Treinen;David Robertson,"['bargain', 'medium', 'premium']",13728711.0,112809008.0,158571377.0,15.0,medium,False,False,True
+WSH,SP,Michael Soroka,267,20,Trevor Williams,['premium'],192048.0,108825764.0,109465924.0,,,False,False,False
+SEA,2B,Jorge Polanco,58,15,Ildemaro Vargas;Thairo Estrada;Marcus Semien,"['bargain', 'medium', 'premium']",4875122.0,150096087.0,166346493.0,7.0,premium,False,False,True
+CHC,DH,Justin Turner,24,9,Masataka Yoshida;J.D. Martinez;Yordan Alvarez,"['premium', 'premium', 'premium']",0.0,231750554.0,214770073.0,5.0,premium,False,False,True
+PIT,SP,Andrew Heaney,267,20,Spencer Turnbull;Sonny Gray;Jameson Taillon,"['premium', 'premium', 'premium']",0.0,89405037.0,84433338.0,,,False,False,False
+LAA,3B,Yoan Moncada,49,13,Josh Rojas;Matt Carpenter;Matt Chapman,"['bargain', 'medium', 'premium']",11380222.0,172486921.0,210420995.0,,,False,False,False
+PIT,LF,Tommy Pham,64,20,Christian Yelich;Joc Pederson;Lourdes Gurriel Jr.,"['premium', 'premium', 'premium']",0.0,89405037.0,84433338.0,3.0,premium,False,True,True
+CLE,C,Austin Hedges,84,19,Victor Caratini;Curt Casali;James McCann,"['premium', 'premium', 'premium']",0.0,109113214.0,100265946.0,5.0,premium,False,False,True
+MIA,SP,Cal Quantrill,267,20,Spencer Turnbull;Sonny Gray;Sean Manaea,"['premium', 'premium', 'premium']",0.0,100069865.0,67794627.0,,,False,False,False
+SD,C,Elias Diaz,84,19,Victor Caratini;James McCann;J.T. Realmuto,"['bargain', 'medium', 'premium']",14496045.0,174855090.0,223175239.0,19.0,bargain,False,False,True
+SEA,2B,Donovan Solano,58,15,Ildemaro Vargas;Thairo Estrada;Marcus Semien,"['bargain', 'medium', 'premium']",4875122.0,150096087.0,166346493.0,6.0,medium,False,False,True
+LAA,SS,Kevin Newman,53,20,Jose Iglesias;Isiah Kiner-Falefa;Bobby Witt Jr.,"['bargain', 'medium', 'premium']",11380222.0,172486921.0,210420995.0,20.0,bargain,False,False,True
+LAA,SP,Kyle Hendricks,267,20,Spencer Turnbull;Trevor Williams;Blake Snell,"['bargain', 'medium', 'premium']",11380222.0,172486921.0,210420995.0,,,False,False,False
+WSH,SS,Amed Rosario,53,18,Bobby Witt Jr.,['premium'],192048.0,108825764.0,109465924.0,5.0,premium,False,False,True
+ARI,SP,Anthony DeSclafani,267,20,Trevor Williams;Spencer Turnbull;Sonny Gray,"['premium', 'premium', 'premium']",0.0,178809082.0,177499443.0,,,False,False,False
+CWS,LF,Austin Slater,64,20,Christian Yelich;Joc Pederson;Kyle Schwarber,"['premium', 'premium', 'premium']",0.0,143166866.0,79965430.0,9.0,premium,False,False,True
+ATL,LF,Alex Verdugo,64,20,Joc Pederson;Christian Yelich;Kyle Schwarber,"['premium', 'premium', 'premium']",0.0,238128381.0,220611106.0,2.0,premium,False,True,True
+ARI,RP,Kendall Graveman,337,20,Blake Treinen;Reynaldo López;David Robertson,"['premium', 'premium', 'premium']",0.0,178809082.0,177499443.0,,,False,False,False
+ARI,RP,Jalen Beeks,337,20,Blake Treinen;Reynaldo López;David Robertson,"['premium', 'premium', 'premium']",0.0,178809082.0,177499443.0,14.0,premium,False,False,True
+NYM,1B,Jared Young,55,18,Dominic Smith;Rowdy Tellez;Bryce Harper,"['bargain', 'medium', 'premium']",5727755.0,323210494.0,342303011.0,,,False,False,False
+TEX,SP,Patrick Corbin,267,20,Trevor Williams;Spencer Turnbull;Sean Manaea,"['premium', 'premium', 'premium']",0.0,228045408.0,226526491.0,19.0,premium,False,False,True
+SD,LF,Connor Joe,64,20,David Peralta;Lourdes Gurriel Jr.;Christian Yelich,"['bargain', 'medium', 'premium']",14496045.0,174855090.0,223175239.0,16.0,bargain,False,False,True
+WSH,SS,Paul DeJong,53,18,Bobby Witt Jr.,['premium'],192048.0,108825764.0,109465924.0,4.0,premium,False,False,True
+ATL,LF,Bryan De La Cruz,64,20,Joc Pederson;Christian Yelich;Kyle Schwarber,"['premium', 'premium', 'premium']",0.0,238128381.0,220611106.0,,,False,False,False
+LAA,SS,Nicky Lopez,53,20,Jose Iglesias;Isiah Kiner-Falefa;Bobby Witt Jr.,"['bargain', 'medium', 'premium']",11380222.0,172486921.0,210420995.0,11.0,bargain,False,False,True
+BAL,RP,Corbin Martin,337,20,Scott Alexander;Blake Treinen;David Robertson,"['bargain', 'medium', 'premium']",13728711.0,112809008.0,158571377.0,,,False,False,False
+ARI,SS,Sergio Alcantara,53,18,Bobby Witt Jr.;Fernando Tatis Jr.;Willy Adames,"['premium', 'premium', 'premium']",0.0,178809082.0,177499443.0,,,False,False,False

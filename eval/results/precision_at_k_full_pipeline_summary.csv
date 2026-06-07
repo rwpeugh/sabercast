@@ -1,0 +1,2 @@
+n_events,median_pool_size,random_baseline_p_at_3,pipeline_p_at_3,pipeline_lift_vs_random,pipeline_z_score,pipeline_p_value,retrieval_p_at_3,retrieval_pool_at_20_recall,tier_demoted_hits
+43,64,0.04,0.093,2.32,1.786,0.0371,0.0698,0.6047,22
